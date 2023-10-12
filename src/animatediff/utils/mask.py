@@ -151,7 +151,7 @@ class MaskPredictor:
 
         return result
 
-def loda_mask_list(mask_dir, masked_area_list, mask_padding):
+def load_mask_list(mask_dir, masked_area_list, mask_padding):
 
     mask_frame_list = sorted(glob.glob( os.path.join(mask_dir, "[0-9]*.png"), recursive=False))
 
@@ -169,6 +169,173 @@ def loda_mask_list(mask_dir, masked_area_list, mask_padding):
         masked_area_list[cur] = tmp[None,...]
 
     return masked_area_list
+
+def crop_mask_list(mask_list):
+    area_list = []
+
+    max_h = 0
+    max_w = 0
+
+    for m in mask_list:
+        if m is None:
+            area_list.append(None)
+            continue
+        area = np.where(m[0] == True)
+        if area[0].size == 0:
+            area_list.append(None)
+            continue
+
+        ymin = min(area[0])
+        ymax = max(area[0])
+        xmin = min(area[1])
+        xmax = max(area[1])
+        h = ymax+1 - ymin
+        w = xmax+1 - xmin
+        max_h = max(max_h, h)
+        max_w = max(max_w, w)
+        area_list.append( (ymin, ymax, xmin, xmax) )
+        #crop = m[ymin:ymax+1,xmin:xmax+1]
+
+    logger.info(f"{max_h=}")
+    logger.info(f"{max_w=}")
+
+    border_h = mask_list[0].shape[1]
+    border_w = mask_list[0].shape[2]
+
+    mask_pos_list=[]
+    cropped_mask_list=[]
+
+    for a, m in zip(area_list, mask_list):
+        if m is None or a is None:
+            mask_pos_list.append(None)
+            cropped_mask_list.append(None)
+            continue
+
+        ymin,ymax,xmin,xmax = a
+        h = ymax+1 - ymin
+        w = xmax+1 - xmin
+
+        # H
+        diff_h = max_h - h
+        dh1 = diff_h//2
+        dh2 = diff_h - dh1
+        y1 = ymin - dh1
+        y2 = ymax + dh2
+        if y1 < 0:
+            y1 = 0
+            y2 = max_h-1
+        elif y2 >= border_h:
+            y1 = (border_h-1) - (max_h - 1)
+            y2 = (border_h-1)
+
+        # W
+        diff_w = max_w - w
+        dw1 = diff_w//2
+        dw2 = diff_w - dw1
+        x1 = xmin - dw1
+        x2 = xmax + dw2
+        if x1 < 0:
+            x1 = 0
+            x2 = max_w-1
+        elif x2 >= border_w:
+            x1 = (border_w-1) - (max_w - 1)
+            x2 = (border_w-1)
+
+        mask_pos_list.append( (int(x1),int(y1)) )
+        m = m[0][y1:y2+1,x1:x2+1]
+        cropped_mask_list.append( m[None,...] )
+
+
+    return cropped_mask_list, mask_pos_list, (max_h,max_w)
+
+def crop_frames(pos_list, crop_size_hw, frame_dir):
+    h,w = crop_size_hw
+
+    for i,pos in tqdm(enumerate(pos_list),total=len(pos_list)):
+        filename = f"{i:08d}.png"
+        frame_path = frame_dir / filename
+        if not frame_path.is_file():
+            logger.info(f"{frame_path=} not found. skip")
+            continue
+        if pos is None:
+            continue
+
+        x, y = pos
+
+        tmp = np.asarray(Image.open(frame_path))
+        tmp = tmp[y:y+h,x:x+w,...]
+        Image.fromarray(tmp).save(frame_path)
+
+def save_crop_info(mask_pos_list, crop_size_hw, frame_size_hw, save_path):
+    import json
+
+    pos_map = {}
+
+    for i, pos in enumerate(mask_pos_list):
+        if pos is not None:
+            pos_map[str(i)]=pos
+
+    info = {
+        "frame_height" : int(frame_size_hw[0]),
+        "frame_width" : int(frame_size_hw[1]),
+        "height": int(crop_size_hw[0]),
+        "width": int(crop_size_hw[1]),
+        "pos_map" : pos_map,
+    }
+
+    with open(save_path, mode="wt", encoding="utf-8") as f:
+        json.dump(info, f, ensure_ascii=False, indent=4)
+
+def restore_position(mask_list, crop_info):
+
+    f_h = crop_info["frame_height"]
+    f_w = crop_info["frame_width"]
+
+    h = crop_info["height"]
+    w = crop_info["width"]
+    pos_map = crop_info["pos_map"]
+
+    for i in pos_map:
+        x,y = pos_map[i]
+        i = int(i)
+
+        m = mask_list[i]
+
+        if m is None:
+            continue
+
+        m = cv2.resize( m, (w,h) )
+        if len(m.shape) == 2:
+            m = m[...,None]
+
+        frame = np.zeros(shape=(f_h,f_w,m.shape[2]), dtype=np.uint8)
+
+        frame[y:y+h,x:x+w,...] = m
+        mask_list[i] = frame
+
+
+    return mask_list
+
+def load_frame_list(frame_dir, frame_array_list, crop_info):
+    frame_list = sorted(glob.glob( os.path.join(frame_dir, "[0-9]*.png"), recursive=False))
+
+    for f in frame_list:
+        cur = int(Path(f).stem)
+        frame_array_list[cur] = np.asarray(Image.open(f))
+
+    if not crop_info:
+        logger.info(f"crop_info is not exists -> skip restore")
+        return frame_array_list
+
+    for i,f in enumerate(frame_array_list):
+        if f is None:
+            continue
+        frame_array_list[i] = f
+
+    frame_array_list = restore_position(frame_array_list, crop_info)
+
+    return frame_array_list
+
 
 def create_fg(mask_token, frame_dir, output_dir, output_mask_dir, masked_area_list,
               box_threshold=0.3,
@@ -208,31 +375,27 @@ def create_fg(mask_token, frame_dir, output_dir, output_mask_dir, masked_area_li
 
             mask_array = predictor(img, mask_token)
 
-            mask_array2 = mask_array.copy()
+            mask_array = cv2.morphologyEx(mask_array[0].astype(np.uint8), cv2.MORPH_OPEN, kernel2)
 
             if mask_padding < 0:
-                mask_array2 = cv2.erode(mask_array2[0].astype(np.uint8),kernel,iterations = 1)
-                mask_array2 = mask_array2[None,...]
+                mask_array = cv2.erode(mask_array.astype(np.uint8),kernel,iterations = 1)
             elif mask_padding > 0:
-                mask_array2 = cv2.dilate(mask_array2[0].astype(np.uint8),kernel,iterations = 1)
-                mask_array2 = mask_array2[None,...]
+                mask_array = cv2.dilate(mask_array.astype(np.uint8),kernel,iterations = 1)
 
             if masked_area_list[cur_frame_no] is not None:
-                masked_area_list[cur_frame_no] = masked_area_list[cur_frame_no] | mask_array2
+                masked_area_list[cur_frame_no] = masked_area_list[cur_frame_no] | mask_array[None,...]
             else:
-                masked_area_list[cur_frame_no] = mask_array2
+                masked_area_list[cur_frame_no] = mask_array[None,...]
 
 
             if output_mask_dir:
-                mask_array2 = mask_array2[0].astype(np.uint8).clip(0,1)
+                mask_array2 = mask_array.astype(np.uint8).clip(0,1)
                 mask_array2 *= 255
                 Image.fromarray(mask_array2).save( output_mask_dir / file_name )
 
-            mask_array = cv2.morphologyEx(mask_array[0].astype(np.uint8), cv2.MORPH_OPEN, kernel2)
-            mask_array = cv2.dilate(mask_array,kernel2,iterations = 1)
-
             img_array = np.asarray(img).copy()
-            img_array[mask_array == 0] = bg_color
+            if bg_color is not None:
+                img_array[mask_array == 0] = bg_color
 
             img = Image.fromarray(img_array)
 

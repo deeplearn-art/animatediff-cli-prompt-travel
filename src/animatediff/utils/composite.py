@@ -112,7 +112,6 @@ class LaplacianPyramidBlender:
 
 		num_levels = int(np.log2(src_image.shape[0]))
 		#normalize image to 0, 1
-		mask_image = mask_image.astype(np.float32)
 		mask_image = np.clip(mask_image, 0, 1).transpose([2, 0, 1])
 
 		src_image = src_image.transpose([2, 0, 1]).astype(np.float32) / 255.0
@@ -123,28 +122,27 @@ class LaplacianPyramidBlender:
 		return composite_image
 
 
-def composite(bg_dir, fg_dir, output_dir, masked_area_list, device="cuda"):
+def composite(bg_dir, fg_list, output_dir, masked_area_list, device="cuda"):
 	bg_list = sorted(glob.glob( os.path.join(bg_dir ,"[0-9]*.png"), recursive=False))
 
 	blender = LaplacianPyramidBlender()
 
-	for bg, mask in tqdm(zip(bg_list, masked_area_list),total=len(bg_list), desc="compositing"):
+	for bg, fg_array, mask in tqdm(zip(bg_list, fg_list, masked_area_list),total=len(bg_list), desc="compositing"):
 		name = Path(bg).name
 		save_path = output_dir / name
 
-		fg = fg_dir / name
-
-		if not fg.is_file():
+		if fg_array is None:
+			logger.info(f"composite fg_array is None -> skip")
 			shutil.copy(bg, save_path)
 			continue
 
 		if mask is None:
+			logger.info(f"mask is None -> skip")
 			shutil.copy(bg, save_path)
 			continue
 
-		bg = np.asarray(Image.open(bg))
-		fg = np.asarray(Image.open(fg)).copy()
-		mask = mask.transpose([1, 2, 0]).astype(np.float32)
+		bg = np.asarray(Image.open(bg)).copy()
+		fg = fg_array
 		mask = np.concatenate([mask, mask, mask], 2)
 
 		h, w, _ = bg.shape
@@ -152,7 +150,12 @@ def composite(bg_dir, fg_dir, output_dir, masked_area_list, device="cuda"):
 		fg = cv2.resize(fg, dsize=(w,h))
 		mask = cv2.resize(mask, dsize=(w,h))
 
-		fg[mask<0.3] = bg[mask<0.3]
+		fg[mask==False] = bg[mask==False]
+
+		mask = mask.astype(np.float32) * 255
+		mask = cv2.GaussianBlur(mask, (15, 15), 0)
+		mask = mask / 255
+
 
 		img = blender(fg, bg, mask,device)
 

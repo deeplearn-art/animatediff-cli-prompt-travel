@@ -1,4 +1,5 @@
 import glob
+import json
 import logging
 import os.path
 import shutil
@@ -698,13 +699,33 @@ def create_mask(
         int,
         typer.Option(
             "--mask_padding",
-            "-p",
+            "-mp",
             min=-100,
             max=100,
             help="padding pixel value",
             rich_help_panel="create mask",
         ),
     ] = 0,
+    no_gb: Annotated[
+        bool,
+        typer.Option(
+            "--no_gb",
+            "-ng",
+            is_flag=True,
+            help="no green back",
+            rich_help_panel="create mask",
+        ),
+    ] = False,
+    no_crop: Annotated[
+        bool,
+        typer.Option(
+            "--no_crop",
+            "-nc",
+            is_flag=True,
+            help="no crop",
+            rich_help_panel="create mask",
+        ),
+    ] = False,
     low_vram: Annotated[
         bool,
         typer.Option(
@@ -782,7 +803,8 @@ def create_mask(
     ] = False,
 ):
     """Create mask from prompt"""
-    from animatediff.utils.mask import create_bg, create_fg
+    from animatediff.utils.mask import (create_bg, create_fg, crop_frames,
+                                        crop_mask_list, save_crop_info)
 
     is_danbooru_format = not is_no_danbooru_format
     with_confidence = not without_confidence
@@ -842,14 +864,31 @@ def create_mask(
             box_threshold=box_threshold,
             text_threshold=text_threshold,
             mask_padding=mask_padding,
-            sam_checkpoint= "data/models/SAM/sam_hq_vit_l.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
+            sam_checkpoint= "data/models/SAM/sam_hq_vit_h.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
+            bg_color=None if no_gb else (0,255,0),
         )
+
+        if not no_crop:
+            frame_size_hw = (masked_area[0].shape[1],masked_area[0].shape[2])
+            cropped_mask_list, mask_pos_list, crop_size_hw = crop_mask_list(masked_area)
+
+            logger.info(f"crop fg_masked_dir")
+            crop_frames(mask_pos_list, crop_size_hw, fg_masked_dir)
+            logger.info(f"crop fg_mask_dir")
+            crop_frames(mask_pos_list, crop_size_hw, fg_mask_dir)
+            save_crop_info(mask_pos_list, crop_size_hw, frame_size_hw, fg_dir / "crop_info.json")
+        else:
+            crop_size_hw = None
 
         logger.info(f"mask from [{mask_token}] are output to {fg_dir}")
 
         shutil.copytree(fg_masked_dir, fg_masked_dir.parent.joinpath("controlnet_ip2p"), dirs_exist_ok=True)
 
-        output_list.append(fg_dir)
+        if crop_size_hw:
+            if crop_size_hw[0] == 0 or crop_size_hw[1] == 0:
+                crop_size_hw = None
+
+        output_list.append((fg_dir, crop_size_hw))
 
     torch.cuda.empty_cache()
 
@@ -871,7 +910,7 @@ def create_mask(
 
     shutil.copytree(bg_inpaint_dir, bg_inpaint_dir.parent.joinpath("controlnet_ip2p"), dirs_exist_ok=True)
 
-    output_list.append(bg_dir)
+    output_list.append((bg_dir,None))
 
     torch.cuda.empty_cache()
 
@@ -880,7 +919,7 @@ def create_mask(
         with open(ignore_list) as f:
             black_list = [s.strip() for s in f.readlines()]
 
-    for output in output_list:
+    for output, size in output_list:
 
         model_config.prompt_map = get_labels(
             frame_dir= output / "00_controlnet_image/controlnet_tile",
@@ -894,6 +933,20 @@ def create_mask(
         )
 
         model_config.controlnet_map["input_image_dir"] = os.path.relpath((output / "00_controlnet_image" ).absolute(), data_dir)
+
+        if size is not None:
+            h, w = size
+            height = 1024 * (h/(h+w))
+            width = 1024 * (w/(h+w))
+            height = int(height//8 * 8)
+            width = int(width//8 * 8)
+
+            model_config.stylize_config["0"]["width"]=width
+            model_config.stylize_config["0"]["height"]=height
+            if "1" in model_config.stylize_config:
+                model_config.stylize_config["1"]["width"]=int(width * 1.25 //8*8)
+                model_config.stylize_config["1"]["height"]=int(height * 1.25 //8*8)
+
 
         save_config_path = output.joinpath("prompt.json")
         save_config_path.write_text(model_config.json(indent=4), encoding="utf-8")
@@ -933,7 +986,7 @@ def composite(
         int,
         typer.Option(
             "--mask_padding",
-            "-p",
+            "-mp",
             min=-100,
             max=100,
             help="padding pixel value",
@@ -954,7 +1007,8 @@ def composite(
     """composite FG and BG"""
 
     from animatediff.utils.composite import composite
-    from animatediff.utils.mask import create_fg, loda_mask_list
+    from animatediff.utils.mask import (create_fg, load_frame_list,
+                                        load_mask_list, restore_position)
 
     prepare_sam_hq(low_vram)
 
@@ -1012,19 +1066,32 @@ def composite(
                 box_threshold=box_threshold,
                 text_threshold=text_threshold,
                 mask_padding=mask_padding,
-                sam_checkpoint= "data/models/SAM/sam_hq_vit_l.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
+                sam_checkpoint= "data/models/SAM/sam_hq_vit_h.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
             )
         else:
             logger.info(f"use {mask_dir=} as mask")
 
             masked_area_list = [None for f in range(frame_len)]
 
-            mask_list = loda_mask_list(mask_dir, masked_area_list, mask_padding)
+            mask_list = load_mask_list(mask_dir, masked_area_list, mask_padding)
+
+        mask_list = [ m.transpose([1,2,0]) if m is not None else m for m in mask_list]
+
+        crop_info_path = frame_dir.parent.parent / "crop_info.json"
+        crop_info={}
+        if crop_info_path.is_file():
+            with open(crop_info_path, mode="rt", encoding="utf-8") as f:
+                crop_info = json.load(f)
+            mask_list = restore_position(mask_list, crop_info)
+
+
+        fg_list = [None for f in range(frame_len)]
+        fg_list = load_frame_list(frame_dir, fg_list, crop_info)
 
         output_dir = save_dir.joinpath(f"bg_{i:02d}_{time_str}")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        composite(bg_dir, frame_dir, output_dir, mask_list)
+        composite(bg_dir, fg_list, output_dir, mask_list)
 
         bg_dir = output_dir
 

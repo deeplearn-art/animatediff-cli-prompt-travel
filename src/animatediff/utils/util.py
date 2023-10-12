@@ -398,7 +398,7 @@ def prepare_sam_hq(low_vram):
 
     os.makedirs("data/models/SAM", exist_ok=True)
     for hub_file in [
-        "sam_hq_vit_l.pth" if not low_vram else "sam_hq_vit_b.pth"
+        "sam_hq_vit_h.pth" if not low_vram else "sam_hq_vit_b.pth"
     ]:
         path = Path(hub_file)
 
