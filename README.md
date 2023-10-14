@@ -8,9 +8,15 @@ It seems to work surprisingly well!
 
 ### Example
 - [A command to stylization with mask has been added](https://github.com/s9roll7/animatediff-cli-prompt-travel#video-stylization-with-mask).
+- more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/111)
 
-<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/e2ce68b0-f904-4fc3-8d5c-2224b5ffc1d3" muted="false"></video></div>
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/461cd68a-511a-4ad8-a2ee-7078faed7354" muted="false"></video></div>
 <br>
+
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/71134608-1f6d-4c97-8535-68e26d692f87" muted="false"></video></div>
+<br>
+
+
 
 - [A command to automate video stylization has been added](https://github.com/s9roll7/animatediff-cli-prompt-travel#video-stylization).
 - Original / First generation result / Second generation(for upscaling) result
@@ -400,6 +406,8 @@ animatediff stylize create-mask STYLYZE_DIR -lo
 # The background is output to the following directory (BG_STYLYZE_DIR)
 # STYLYZE_DIR/bg_timestamp_str
 
+("animatediff stylize create-mask -h" for help)
+
 # [4] generate foreground
 animatediff stylize generate FG_STYLYZE_DIR
 
@@ -438,7 +446,13 @@ animatediff stylize generate FG_STYLYZE_DIR
 # [6] composite
 animatediff stylize composite STYLYZE_DIR
 
-# See help for detailed options.
+# By default, "sam hq" and "groundingdino" are used for cropping, but it is not always possible to crop the image well.
+# In that case, you can try "rembg" or "anime-segmentation".
+# However, when using "rembg" and "anime-segmentation", you cannot specify the target text to be clipped.
+animatediff stylize composite STYLYZE_DIR -rem
+animatediff stylize composite STYLYZE_DIR -anim
+
+# See help for detailed options. (animatediff stylize composite -h)
 ```
 
 
@@ -483,6 +497,8 @@ animatediff tile-upscale output/2023-08-25T20-00-00-sample-mistoonanime_v20/00-3
 - [sam-hq](https://github.com/SysCV/sam-hq)
 - [Grounded-Segment-Anything](https://github.com/IDEA-Research/Grounded-Segment-Anything)
 - [ProPainter](https://github.com/sczhou/ProPainter)
+- [rembg](https://github.com/danielgatis/rembg)
+- [anime-segmentation](https://github.com/SkyTNT/anime-segmentation)
 
 <br>
 <br>
