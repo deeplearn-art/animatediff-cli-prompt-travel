@@ -180,6 +180,7 @@ def crop_mask_list(mask_list):
         if m is None:
             area_list.append(None)
             continue
+        m = m > 127
         area = np.where(m[0] == True)
         if area[0].size == 0:
             area_list.append(None)
@@ -363,7 +364,7 @@ def create_fg(mask_token, frame_dir, output_dir, output_mask_dir, masked_area_li
 
         if mask_padding != 0:
             kernel = np.ones((abs(mask_padding),abs(mask_padding)),np.uint8)
-        kernel2 = np.ones((8,8),np.uint8)
+        kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
         for i, frame in tqdm(enumerate(frame_list),total=len(frame_list), desc=f"creating mask from {mask_token=}"):
             frame = Path(frame)
@@ -374,24 +375,28 @@ def create_fg(mask_token, frame_dir, output_dir, output_mask_dir, masked_area_li
             img = Image.open(frame)
 
             mask_array = predictor(img, mask_token)
+            mask_array = mask_array[0].astype(np.uint8) * 255
 
-            mask_array = cv2.morphologyEx(mask_array[0].astype(np.uint8), cv2.MORPH_OPEN, kernel2)
 
             if mask_padding < 0:
                 mask_array = cv2.erode(mask_array.astype(np.uint8),kernel,iterations = 1)
             elif mask_padding > 0:
                 mask_array = cv2.dilate(mask_array.astype(np.uint8),kernel,iterations = 1)
 
+            mask_array = cv2.morphologyEx(mask_array.astype(np.uint8), cv2.MORPH_OPEN, kernel2)
+            mask_array = cv2.GaussianBlur(mask_array, (7, 7), sigmaX=3, sigmaY=3, borderType=cv2.BORDER_DEFAULT)
+
             if masked_area_list[cur_frame_no] is not None:
-                masked_area_list[cur_frame_no] = masked_area_list[cur_frame_no] | mask_array[None,...]
+                masked_area_list[cur_frame_no] = np.where(masked_area_list[cur_frame_no] > mask_array[None,...], masked_area_list[cur_frame_no], mask_array[None,...])
+                #masked_area_list[cur_frame_no] = masked_area_list[cur_frame_no] | mask_array[None,...]
             else:
                 masked_area_list[cur_frame_no] = mask_array[None,...]
 
 
             if output_mask_dir:
-                mask_array2 = mask_array.astype(np.uint8).clip(0,1)
-                mask_array2 *= 255
-                Image.fromarray(mask_array2).save( output_mask_dir / file_name )
+                #mask_array2 = mask_array.astype(np.uint8).clip(0,1)
+                #mask_array2 *= 255
+                Image.fromarray(mask_array).save( output_mask_dir / file_name )
 
             img_array = np.asarray(img).copy()
             if bg_color is not None:
@@ -488,12 +493,13 @@ def create_bg(frame_dir, output_dir, masked_area_list,
         out_size = org_size
 
         masked_area_list = [m[0] for m in masked_area_list]
-        masked_area_list = [cv2.resize(m.astype(np.uint8)*255, dsize=size) for m in masked_area_list]
+        masked_area_list = [cv2.resize(m.astype(np.uint8), dsize=size) for m in masked_area_list]
         masked_area_list = [ m>127 for m in masked_area_list]
         masked_area_list = [m[None,...] for m in masked_area_list]
 
     else:
         frames, size, out_size = resize_frames(frames, None)
+        masked_area_list = [ m>127 for m in masked_area_list]
 
     w, h = size
 

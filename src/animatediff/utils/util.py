@@ -308,12 +308,12 @@ def extract_frames(movie_file_path, fps, out_dir, aspect_ratio, duration, offset
         if width < height:
             r = height / width
             width = size_of_short_edge
-            height = int( (size_of_short_edge * r)//2 * 2)
+            height = int( (size_of_short_edge * r)//8 * 8)
             node = node.filter('scale', size_of_short_edge, -1)
         else:
             r = width / height
             height = size_of_short_edge
-            width = int( (size_of_short_edge * r)//2 * 2)
+            width = int( (size_of_short_edge * r)//8 * 8)
             node = node.filter('scale', -1, size_of_short_edge)
 
     if aspect_ratio > 0:
@@ -330,8 +330,8 @@ def extract_frames(movie_file_path, fps, out_dir, aspect_ratio, duration, offset
             y = (height - hh)//2
             w = width
             h = hh
-        w = int(w // 2 * 2)
-        h = int(h // 2 * 2)
+        w = int(w // 8 * 8)
+        h = int(h // 8 * 8)
         logger.info(f"crop to {w=},{h=}")
         node = node.crop(x, y, w, h)
 
@@ -444,3 +444,25 @@ def prepare_propainter():
 
     repo = git.Repo.clone_from(url="https://github.com/sczhou/ProPainter", to_path="src/animatediff/repo/ProPainter", no_checkout=True )
     repo.git.checkout("a8a5827ca5e7e8c1b4c360ea77cbb2adb3c18370")
+
+
+def prepare_anime_seg():
+    import os
+    from pathlib import PurePosixPath
+
+    from huggingface_hub import hf_hub_download
+
+    os.makedirs("data/models/anime_seg", exist_ok=True)
+    for hub_file in [
+        "isnetis.onnx",
+    ]:
+        path = Path(hub_file)
+
+        saved_path = "data/models/anime_seg" / path
+
+        if os.path.exists(saved_path):
+            continue
+
+        hf_hub_download(
+            repo_id="skytnt/anime-seg", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/anime_seg"
+        )

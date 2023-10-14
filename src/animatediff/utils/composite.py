@@ -150,14 +150,16 @@ def composite(bg_dir, fg_list, output_dir, masked_area_list, device="cuda"):
 		fg = cv2.resize(fg, dsize=(w,h))
 		mask = cv2.resize(mask, dsize=(w,h))
 
-		fg[mask==False] = bg[mask==False]
 
-		mask = mask.astype(np.float32) * 255
+		mask = mask.astype(np.float32)
+#		mask = mask * 255
 		mask = cv2.GaussianBlur(mask, (15, 15), 0)
 		mask = mask / 255
 
+		fg = fg * mask + bg * (1-mask)
 
 		img = blender(fg, bg, mask,device)
+
 
 		img = Image.fromarray(img)
 		img.save(save_path)

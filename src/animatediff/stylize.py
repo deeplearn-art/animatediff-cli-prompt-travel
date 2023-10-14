@@ -16,9 +16,9 @@ from animatediff import __version__, get_dir
 from animatediff.settings import ModelConfig, get_model_config
 from animatediff.utils.tagger import get_labels
 from animatediff.utils.util import (extract_frames, get_resized_image,
-                                    path_from_cwd, prepare_groundingDINO,
-                                    prepare_propainter, prepare_sam_hq,
-                                    prepare_softsplat)
+                                    path_from_cwd, prepare_anime_seg,
+                                    prepare_groundingDINO, prepare_propainter,
+                                    prepare_sam_hq, prepare_softsplat)
 
 logger = logging.getLogger(__name__)
 
@@ -726,6 +726,26 @@ def create_mask(
             rich_help_panel="create mask",
         ),
     ] = False,
+    use_rembg: Annotated[
+        bool,
+        typer.Option(
+            "--use_rembg",
+            "-rem",
+            is_flag=True,
+            help="use [rembg] instead of [Sam+GroundingDINO]",
+            rich_help_panel="create mask",
+        ),
+    ] = False,
+    use_animeseg: Annotated[
+        bool,
+        typer.Option(
+            "--use_animeseg",
+            "-anim",
+            is_flag=True,
+            help="use [anime-segmentation] instead of [Sam+GroundingDINO]",
+            rich_help_panel="create mask",
+        ),
+    ] = False,
     low_vram: Annotated[
         bool,
         typer.Option(
@@ -805,13 +825,21 @@ def create_mask(
     """Create mask from prompt"""
     from animatediff.utils.mask import (create_bg, create_fg, crop_frames,
                                         crop_mask_list, save_crop_info)
+    from animatediff.utils.mask_animseg import animseg_create_fg
+    from animatediff.utils.mask_rembg import rembg_create_fg
 
     is_danbooru_format = not is_no_danbooru_format
     with_confidence = not without_confidence
 
+    if use_animeseg and use_rembg:
+        raise ValueError("use_animeseg and use_rembg cannot be enabled at the same time")
+
     prepare_sam_hq(low_vram)
     prepare_groundingDINO()
     prepare_propainter()
+
+    if use_animeseg:
+        prepare_anime_seg()
 
     time_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
@@ -844,6 +872,12 @@ def create_mask(
             c_dir = controlnet_root.joinpath(c)
             c_dir.mkdir(parents=True, exist_ok=True)
 
+    if use_rembg:
+        create_mask_list = ["rembg"]
+    elif use_animeseg:
+        create_mask_list = ["anime-segmentation"]
+
+
     for i,mask_token in enumerate(create_mask_list):
         fg_dir = stylize_dir.joinpath(f"fg_{i:02d}_{time_str}")
         fg_dir.mkdir(parents=True, exist_ok=True)
@@ -855,18 +889,37 @@ def create_mask(
         fg_mask_dir = fg_dir / "00_mask"
         fg_mask_dir.mkdir(parents=True, exist_ok=True)
 
-        masked_area = create_fg(
-            mask_token=mask_token,
-            frame_dir=frame_dir,
-            output_dir=fg_masked_dir,
-            output_mask_dir=fg_mask_dir,
-            masked_area_list=masked_area,
-            box_threshold=box_threshold,
-            text_threshold=text_threshold,
-            mask_padding=mask_padding,
-            sam_checkpoint= "data/models/SAM/sam_hq_vit_h.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
-            bg_color=None if no_gb else (0,255,0),
-        )
+        if use_animeseg:
+            masked_area = animseg_create_fg(
+                frame_dir=frame_dir,
+                output_dir=fg_masked_dir,
+                output_mask_dir=fg_mask_dir,
+                masked_area_list=masked_area,
+                mask_padding=mask_padding,
+                bg_color=None if no_gb else (0,255,0),
+            )
+        elif use_rembg:
+            masked_area = rembg_create_fg(
+                frame_dir=frame_dir,
+                output_dir=fg_masked_dir,
+                output_mask_dir=fg_mask_dir,
+                masked_area_list=masked_area,
+                mask_padding=mask_padding,
+                bg_color=None if no_gb else (0,255,0),
+            )
+        else:
+            masked_area = create_fg(
+                mask_token=mask_token,
+                frame_dir=frame_dir,
+                output_dir=fg_masked_dir,
+                output_mask_dir=fg_mask_dir,
+                masked_area_list=masked_area,
+                box_threshold=box_threshold,
+                text_threshold=text_threshold,
+                mask_padding=mask_padding,
+                sam_checkpoint= "data/models/SAM/sam_hq_vit_h.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
+                bg_color=None if no_gb else (0,255,0),
+            )
 
         if not no_crop:
             frame_size_hw = (masked_area[0].shape[1],masked_area[0].shape[2])
@@ -993,6 +1046,26 @@ def composite(
             rich_help_panel="create mask",
         ),
     ] = 0,
+    use_rembg: Annotated[
+        bool,
+        typer.Option(
+            "--use_rembg",
+            "-rem",
+            is_flag=True,
+            help="use [rembg] instead of [Sam+GroundingDINO]",
+            rich_help_panel="create mask",
+        ),
+    ] = False,
+    use_animeseg: Annotated[
+        bool,
+        typer.Option(
+            "--use_animeseg",
+            "-anim",
+            is_flag=True,
+            help="use [anime-segmentation] instead of [Sam+GroundingDINO]",
+            rich_help_panel="create mask",
+        ),
+    ] = False,
     low_vram: Annotated[
         bool,
         typer.Option(
@@ -1009,8 +1082,15 @@ def composite(
     from animatediff.utils.composite import composite
     from animatediff.utils.mask import (create_fg, load_frame_list,
                                         load_mask_list, restore_position)
+    from animatediff.utils.mask_animseg import animseg_create_fg
+    from animatediff.utils.mask_rembg import rembg_create_fg
+
+    if use_animeseg and use_rembg:
+        raise ValueError("use_animeseg and use_rembg cannot be enabled at the same time")
 
     prepare_sam_hq(low_vram)
+    if use_animeseg:
+        prepare_anime_seg()
 
     time_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
@@ -1057,17 +1137,35 @@ def composite(
 
             masked_area_list = [None for f in range(frame_len)]
 
-            mask_list = create_fg(
-                mask_token=mask_token,
-                frame_dir=frame_dir,
-                output_dir=fg_tmp_dir,
-                output_mask_dir=None,
-                masked_area_list=masked_area_list,
-                box_threshold=box_threshold,
-                text_threshold=text_threshold,
-                mask_padding=mask_padding,
-                sam_checkpoint= "data/models/SAM/sam_hq_vit_h.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
-            )
+            if use_animeseg:
+                mask_list = animseg_create_fg(
+                    frame_dir=frame_dir,
+                    output_dir=fg_tmp_dir,
+                    output_mask_dir=None,
+                    masked_area_list=masked_area_list,
+                    mask_padding=mask_padding,
+                )
+            elif use_rembg:
+                mask_list = rembg_create_fg(
+                    frame_dir=frame_dir,
+                    output_dir=fg_tmp_dir,
+                    output_mask_dir=None,
+                    masked_area_list=masked_area_list,
+                    mask_padding=mask_padding,
+                )
+            else:
+                mask_list = create_fg(
+                    mask_token=mask_token,
+                    frame_dir=frame_dir,
+                    output_dir=fg_tmp_dir,
+                    output_mask_dir=None,
+                    masked_area_list=masked_area_list,
+                    box_threshold=box_threshold,
+                    text_threshold=text_threshold,
+                    mask_padding=mask_padding,
+                    sam_checkpoint= "data/models/SAM/sam_hq_vit_h.pth" if not low_vram else "data/models/SAM/sam_hq_vit_b.pth",
+                )
+
         else:
             logger.info(f"use {mask_dir=} as mask")
 
