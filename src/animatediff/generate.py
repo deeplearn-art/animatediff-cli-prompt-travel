@@ -222,6 +222,10 @@ def create_controlnet_model(type_str):
         return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_scribble')
     elif type_str == "controlnet_seg":
         return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_seg')
+    elif type_str == "qr_code_monster_v1":
+        return ControlNetModel.from_pretrained('monster-labs/control_v1p_sd15_qrcode_monster')
+    elif type_str == "qr_code_monster_v2":
+        return ControlNetModel.from_pretrained('monster-labs/control_v1p_sd15_qrcode_monster', subfolder='v2')
     else:
         raise ValueError(f"unknown controlnet type {type_str}")
 
