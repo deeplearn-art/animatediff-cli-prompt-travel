@@ -182,6 +182,24 @@
       "control_guidance_end": 1.0,
       "control_scale_list":[0.5,0.4,0.3,0.2,0.1]
     },
+    "qr_code_monster_v1": {
+      "enable": true,
+      "use_preprocessor":true,
+      "guess_mode":false,
+      "controlnet_conditioning_scale": 1.0,
+      "control_guidance_start": 0.0,
+      "control_guidance_end": 1.0,
+      "control_scale_list":[0.5,0.4,0.3,0.2,0.1]
+    },
+    "qr_code_monster_v2": {
+      "enable": true,
+      "use_preprocessor":true,
+      "guess_mode":false,
+      "controlnet_conditioning_scale": 1.0,
+      "control_guidance_start": 0.0,
+      "control_guidance_end": 1.0,
+      "control_scale_list":[0.5,0.4,0.3,0.2,0.1]
+    },
     "controlnet_ref": {
         "enable": false,
         "ref_image": "ref_image/ref_sample.png",

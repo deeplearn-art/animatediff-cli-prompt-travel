@@ -309,12 +309,12 @@ def extract_frames(movie_file_path, fps, out_dir, aspect_ratio, duration, offset
             r = height / width
             width = size_of_short_edge
             height = int( (size_of_short_edge * r)//8 * 8)
-            node = node.filter('scale', size_of_short_edge, -1)
+            node = node.filter('scale', size_of_short_edge, height)
         else:
             r = width / height
             height = size_of_short_edge
             width = int( (size_of_short_edge * r)//8 * 8)
-            node = node.filter('scale', -1, size_of_short_edge)
+            node = node.filter('scale', width, size_of_short_edge)
 
     if aspect_ratio > 0:
         # aspect ratio (width / height)
