@@ -35,8 +35,9 @@
       "save_input_image": true,
       "resized_to_square": false,
       "scale": 0.5,
-      "is_plus_face": true,
-      "is_plus": true
+      "is_plus_face": false,
+      "is_plus": true,
+      "is_light": false
   },
   "controlnet_map": {
     "input_image_dir" : "controlnet_image/test",
@@ -200,15 +201,24 @@
       "control_guidance_end": 1.0,
       "control_scale_list":[0.5,0.4,0.3,0.2,0.1]
     },
+    "controlnet_mediapipe_face": {
+      "enable": true,
+      "use_preprocessor":true,
+      "guess_mode":false,
+      "controlnet_conditioning_scale": 1.0,
+      "control_guidance_start": 0.0,
+      "control_guidance_end": 1.0,
+      "control_scale_list":[0.5,0.4,0.3,0.2,0.1]
+    },
     "controlnet_ref": {
-        "enable": false,
-        "ref_image": "ref_image/ref_sample.png",
-        "attention_auto_machine_weight": 0.3,
-        "gn_auto_machine_weight": 0.3,
-        "style_fidelity": 0.5,
-        "reference_attn": true,
-        "reference_adain": false,
-        "scale_pattern":[1.0]
+      "enable": false,
+      "ref_image": "ref_image/ref_sample.png",
+      "attention_auto_machine_weight": 0.3,
+      "gn_auto_machine_weight": 0.3,
+      "style_fidelity": 0.5,
+      "reference_attn": true,
+      "reference_adain": false,
+      "scale_pattern":[1.0]
     }
   },
   "upscale_config": {

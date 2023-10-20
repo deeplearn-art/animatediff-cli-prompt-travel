@@ -164,3 +164,39 @@ def composite(bg_dir, fg_list, output_dir, masked_area_list, device="cuda"):
 		img = Image.fromarray(img)
 		img.save(save_path)
 
+def simple_composite(bg_dir, fg_list, output_dir, masked_area_list, device="cuda"):
+	bg_list = sorted(glob.glob( os.path.join(bg_dir ,"[0-9]*.png"), recursive=False))
+
+	for bg, fg_array, mask in tqdm(zip(bg_list, fg_list, masked_area_list),total=len(bg_list), desc="compositing"):
+		name = Path(bg).name
+		save_path = output_dir / name
+
+		if fg_array is None:
+			logger.info(f"composite fg_array is None -> skip")
+			shutil.copy(bg, save_path)
+			continue
+
+		if mask is None:
+			logger.info(f"mask is None -> skip")
+			shutil.copy(bg, save_path)
+			continue
+
+		bg = np.asarray(Image.open(bg)).copy()
+		fg = fg_array
+		mask = np.concatenate([mask, mask, mask], 2)
+
+		h, w, _ = bg.shape
+
+		fg = cv2.resize(fg, dsize=(w,h))
+		mask = cv2.resize(mask, dsize=(w,h))
+
+
+		mask = mask.astype(np.float32)
+		mask = cv2.GaussianBlur(mask, (15, 15), 0)
+		mask = mask / 255
+
+		img = fg * mask + bg * (1-mask)
+		img = img.clip(0 , 255).astype(np.uint8)
+
+		img = Image.fromarray(img)
+		img.save(save_path)

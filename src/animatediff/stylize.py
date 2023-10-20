@@ -862,7 +862,11 @@ def create_mask(
 
     output_list = []
 
-    frame_len = len(sorted(glob.glob( os.path.join(frame_dir, "[0-9]*.png"), recursive=False)))
+    stylize_frame = sorted(glob.glob( os.path.join(frame_dir, "[0-9]*.png"), recursive=False))
+    frame_len = len(stylize_frame)
+
+    W, H = Image.open(stylize_frame[0]).size
+    org_frame_size = (H,W)
 
     masked_area = [None for f in range(frame_len)]
 
@@ -999,6 +1003,14 @@ def create_mask(
             if "1" in model_config.stylize_config:
                 model_config.stylize_config["1"]["width"]=int(width * 1.25 //8*8)
                 model_config.stylize_config["1"]["height"]=int(height * 1.25 //8*8)
+        else:
+            height, width = org_frame_size
+            model_config.stylize_config["0"]["width"]=width
+            model_config.stylize_config["0"]["height"]=height
+            if "1" in model_config.stylize_config:
+                model_config.stylize_config["1"]["width"]=int(width * 1.25 //8*8)
+                model_config.stylize_config["1"]["height"]=int(height * 1.25 //8*8)
+
 
 
         save_config_path = output.joinpath("prompt.json")
@@ -1052,7 +1064,7 @@ def composite(
             "--use_rembg",
             "-rem",
             is_flag=True,
-            help="use [rembg] instead of [Sam+GroundingDINO]",
+            help="use \[rembg] instead of \[Sam+GroundingDINO]",
             rich_help_panel="create mask",
         ),
     ] = False,
@@ -1062,7 +1074,7 @@ def composite(
             "--use_animeseg",
             "-anim",
             is_flag=True,
-            help="use [anime-segmentation] instead of [Sam+GroundingDINO]",
+            help="use \[anime-segmentation] instead of \[Sam+GroundingDINO]",
             rich_help_panel="create mask",
         ),
     ] = False,
@@ -1076,10 +1088,20 @@ def composite(
             rich_help_panel="create mask/tag",
         ),
     ] = False,
+    is_simple_composite: Annotated[
+        bool,
+        typer.Option(
+            "--simple_composite",
+            "-si",
+            is_flag=True,
+            help="simple composite",
+            rich_help_panel="composite",
+        ),
+    ] = False,
 ):
     """composite FG and BG"""
 
-    from animatediff.utils.composite import composite
+    from animatediff.utils.composite import composite, simple_composite
     from animatediff.utils.mask import (create_fg, load_frame_list,
                                         load_mask_list, restore_position)
     from animatediff.utils.mask_animseg import animseg_create_fg
@@ -1189,7 +1211,10 @@ def composite(
         output_dir = save_dir.joinpath(f"bg_{i:02d}_{time_str}")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        composite(bg_dir, fg_list, output_dir, mask_list)
+        if is_simple_composite:
+            simple_composite(bg_dir, fg_list, output_dir, mask_list)
+        else:
+            composite(bg_dir, fg_list, output_dir, mask_list)
 
         bg_dir = output_dir
 

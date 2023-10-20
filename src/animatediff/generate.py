@@ -226,6 +226,8 @@ def create_controlnet_model(type_str):
         return ControlNetModel.from_pretrained('monster-labs/control_v1p_sd15_qrcode_monster')
     elif type_str == "qr_code_monster_v2":
         return ControlNetModel.from_pretrained('monster-labs/control_v1p_sd15_qrcode_monster', subfolder='v2')
+    elif type_str =="controlnet_mediapipe_face":
+        return ControlNetModel.from_pretrained("CrucibleAI/ControlNetMediaPipeFace", subfolder="diffusion_sd15")
     else:
         raise ValueError(f"unknown controlnet type {type_str}")
 
@@ -242,6 +244,7 @@ default_preprocessor_table={
     "controlnet_normalbae":"normal_bae",
     "controlnet_scribble":"scribble_pidsafe",
     "controlnet_seg":"upernet_seg",
+    "controlnet_mediapipe_face":"mediapipe_face",
 }
 
 def create_preprocessor_from_name(pre_type):
@@ -712,6 +715,7 @@ def ip_adapter_preprocess(
                 ip_adapter_map["scale"] = ip_adapter_config_map["scale"]
                 ip_adapter_map["is_plus"] = ip_adapter_config_map["is_plus"]
                 ip_adapter_map["is_plus_face"] = ip_adapter_config_map["is_plus_face"] if "is_plus_face" in ip_adapter_config_map else False
+                ip_adapter_map["is_light"] = ip_adapter_config_map["is_light"] if "is_light" in ip_adapter_config_map else False
                 ip_adapter_map["images"] = {}
                 for img_path in tqdm(imgs, desc=f"Preprocessing images (ip_adapter)"):
                     frame_no = int(Path(img_path).stem)
