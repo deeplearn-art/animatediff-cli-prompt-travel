@@ -7,15 +7,28 @@ I added a experimental feature to animatediff-cli to change the prompt in the mi
 It seems to work surprisingly well!
 
 ### Example
+
+- img2img
+- This can be improved using controlnet, but this sample does not use it.
+- source / denoising_strength 0.7 / denoising_strength 0.85
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/4a9ecf3e-d1c7-468a-a85f-abce7b4c4aab" muted="false"></video></div>
+<br>
+<br>
+
+- region prompt
+- source / Region division on left and right / Region division into cat shapes
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/333f7891-645a-42f7-bb5c-234c00fe64fb" muted="false"></video></div>
+<br>
+<br>
+
+
+
+
 - [A command to stylization with mask has been added](https://github.com/s9roll7/animatediff-cli-prompt-travel#video-stylization-with-mask).
 - more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/111)
 
 <div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/461cd68a-511a-4ad8-a2ee-7078faed7354" muted="false"></video></div>
 <br>
-
-<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/71134608-1f6d-4c97-8535-68e26d692f87" muted="false"></video></div>
-<br>
-
 
 
 - [A command to automate video stylization has been added](https://github.com/s9roll7/animatediff-cli-prompt-travel#video-stylization).
@@ -24,19 +37,6 @@ It seems to work surprisingly well!
 - more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/29)
 
 <div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/2f1965f2-9a50-485e-ac95-e888a3189ba2" muted="false"></video></div>
-<br>
-
-- Numbered from left to right.
-- 1.prompt + lora
-- 2.prompt + lora + IP-Adapter(scale 0.5)
-- 3.prompt + lora + IP-Adapter Plus(scale 0.5)
-- 4.prompt + lora + Controlnet Reference Only(style_fidelity 0)
-- input image
-
-![0000](https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/4ae90f13-341d-4965-adfc-174ec2e61cd7)
-
-
-<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/d9d300a9-1107-4a3b-a1f1-3245b49dde10" muted="false"></video></div>
 <br>
 
 
