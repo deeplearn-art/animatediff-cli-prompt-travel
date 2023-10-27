@@ -600,12 +600,19 @@ def generate(
         model_config.controlnet_map["controlnet_ref"]["enable"] = ref_for_upscale
 
     model_config.ip_adapter_map["enable"] = ip_adapter_for_upscale
+    for r in model_config.region_map:
+        reg = model_config.region_map[r]
+        if "condition" in reg:
+            if "ip_adapter_map" in reg["condition"]:
+                reg["condition"]["ip_adapter_map"]["enable"] = ip_adapter_for_upscale
 
     model_config.steps = model_config.stylize_config["1"]["steps"] if "steps" in model_config.stylize_config["1"] else model_config.steps
     model_config.guidance_scale = model_config.stylize_config["1"]["guidance_scale"] if "guidance_scale" in model_config.stylize_config["1"] else model_config.guidance_scale
 
-    if "enable" in model_config.img2img_map:
-        model_config.img2img_map["enable"] = model_config.stylize_config["1"]["img2img"] if "img2img" in model_config.stylize_config["1"] else model_config.img2img_map["enable"]
+    model_config.img2img_map["enable"] = model_config.stylize_config["1"]["img2img"]
+
+    if model_config.img2img_map["enable"]:
+        model_config.img2img_map["init_img_dir"] = os.path.relpath(Path(output_0_img_dir).absolute(), data_dir)
 
     save_config_path = stylize_dir.joinpath("prompt_01.json")
     save_config_path.write_text(model_config.json(indent=4), encoding="utf-8")
