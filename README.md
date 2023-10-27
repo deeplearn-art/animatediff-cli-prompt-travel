@@ -600,12 +600,14 @@ ex.  \_\_animal\_\_ for animal.txt. \_\_background-color\_\_ for background-colo
 ### Recommended setting
 - checkpoint : [mistoonAnime_v20](https://civitai.com/models/24149/mistoonanime) for anime, [xxmix9realistic_v40](https://civitai.com/models/47274) for photoreal
 - scheduler : "k_dpmpp_sde"
-- upscale : Enable controlnet_tile and controlnet_ip2p only. If you can provide a good reference image, controlnet_ref may also be useful.
+- upscale : Enable controlnet_tile and controlnet_ip2p only.
+- lora and ip adapter
 
 ### Recommended settings for 8-12 GB of vram
-- max_samples_on_vram : Set to 0 if vram is insufficient when using controlnet
-- max_models_on_vram : 1
+- max_samples_on_vram : 0 (The generation speed for this setting has been improved in the latest version.)
+- max_models_on_vram : 1 (The generation speed for this setting has been improved in the latest version.)
 - Generate at lower resolution and upscale to higher resolution
+- In the latest version, the amount of vram used during generation has been reduced.
 ```sh
 animatediff generate -c config/prompts/your_config.json -W 384 -H 576 -L 48 -C 16
 animatediff tile-upscale output/2023-08-25T20-00-00-sample-mistoonanime_v20/00-341774366206100 -W 512
