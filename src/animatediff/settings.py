@@ -105,6 +105,7 @@ class ModelConfig(BaseSettings):
     scheduler: DiffusionScheduler = Field(DiffusionScheduler.k_dpmpp_2m)  # Scheduler to use
     steps: int = 25  # Number of inference steps to run
     guidance_scale: float = 7.5  # CFG scale to use
+    unet_batch_size: int = 1
     clip_skip: int = 1  # skip the last N-1 layers of the CLIP text encoder
     prompt_fixed_ratio: float = 0.5
     head_prompt: str = ""
@@ -115,6 +116,8 @@ class ModelConfig(BaseSettings):
     lora_map: Dict[str,float]= Field({})
     motion_lora_map: Dict[str,float]= Field({})
     ip_adapter_map: Dict[str,Any]= Field({})
+    img2img_map: Dict[str,Any]= Field({})
+    region_map: Dict[str,Any]= Field({})
     controlnet_map: Dict[str,Any]= Field({})
     upscale_config: Dict[str,Any]= Field({})
     stylize_config: Dict[str,Any]= Field({})

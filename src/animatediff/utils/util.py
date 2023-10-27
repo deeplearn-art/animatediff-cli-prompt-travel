@@ -59,8 +59,8 @@ def path_from_cwd(path: PathLike) -> str:
 
 def resize_for_condition_image(input_image: Image, us_width: int, us_height: int):
     input_image = input_image.convert("RGB")
-    H = int(round(us_height / 64.0)) * 64
-    W = int(round(us_width / 64.0)) * 64
+    H = int(round(us_height / 8.0)) * 8
+    W = int(round(us_width / 8.0)) * 8
     img = input_image.resize((W, H), resample=Image.LANCZOS)
     return img
 
