@@ -1,6 +1,5 @@
 import json
 import logging
-from functools import lru_cache
 from os import PathLike
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
@@ -85,7 +84,6 @@ class InferenceConfig(BaseSettings):
         json_config_path: Path
 
 
-@lru_cache(maxsize=2)
 def get_infer_config(
     is_v2:bool,
 ) -> InferenceConfig:
@@ -132,7 +130,6 @@ class ModelConfig(BaseSettings):
         return f"{self.name.lower()}-{self.path.stem.lower()}"
 
 
-@lru_cache(maxsize=2)
 def get_model_config(config_path: Path) -> ModelConfig:
     settings = ModelConfig(json_config_path=config_path)
     return settings

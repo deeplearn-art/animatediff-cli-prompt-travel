@@ -872,13 +872,13 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         video = []
         for frame_idx in range(latents.shape[0]):
             video.append(
-                self.vae.decode(latents[frame_idx : frame_idx + 1].to(self.vae.device, self.vae.dtype)).sample
+                self.vae.decode(latents[frame_idx : frame_idx + 1].to(self.vae.device, self.vae.dtype)).sample.cpu()
             )
         video = torch.cat(video)
         video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
         video = (video / 2 + 0.5).clamp(0, 1)
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
-        video = video.cpu().float().numpy()
+        video = video.float().numpy()
         return video
 
     def prepare_extra_step_kwargs(self, generator, eta):
@@ -911,13 +911,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
-        ):
-            raise ValueError(
-                f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
-                f" {type(callback_steps)}."
-            )
+        if callback_steps is not None:
+            if not isinstance(callback_steps, list):
+                raise ValueError("`callback_steps` has to be a list of positive integers.")
+            for callback_step in callback_steps:
+                if not isinstance(callback_step, int) or callback_step <= 0:
+                    raise ValueError("`callback_steps` has to be a list of positive integers.")
 
         if prompt is not None and prompt_embeds is not None:
             raise ValueError(
@@ -2225,8 +2224,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
         output_type: Optional[str] = "tensor",
         return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
-        callback_steps: Optional[int] = 1,
+        callback: Optional[Callable[[int, torch.FloatTensor], None]] = None,
+        callback_steps: Optional[List[int]] = None,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         context_frames: int = -1,
         context_stride: int = 3,
@@ -2837,6 +2836,15 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     noise_size = len(noise_list)
                     noise_pred = torch.cat(noise_list)
 
+                # call the callback, if provided
+                if (i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0)) and (
+                    callback is not None and (callback_steps is not None and i in callback_steps)
+                ):
+                    denoised = latents - noise_pred
+                    denoised = self.interpolate_latents(denoised, interpolation_factor, device)
+                    video = torch.from_numpy(self.decode_latents(denoised))
+                    callback(i, video)
+
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(
                     model_output=noise_pred,
@@ -2876,14 +2884,6 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 lat = None
                 latents_list = None
                 tmp_latent = None
-
-
-                # call the callback, if provided
-                if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
-                ):
-                    if callback is not None and i % callback_steps == 0:
-                        callback(i, t, latents)
 
                 stopwatch_stop("LOOP end")
 

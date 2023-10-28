@@ -203,7 +203,7 @@ class FfmpegEncoder:
 
         param = {
             "pix_fmt":"yuv420p",
-            "vcodec":"libx265",
+            "vcodec":"libx264",
             "crf":21,
             "tune":"animation",
         }
@@ -221,7 +221,7 @@ class FfmpegEncoder:
 
         param = {
             "pix_fmt":"yuv420p",
-            "vcodec":"libx265",
+            "vcodec":"libx264",
             "crf":21,
             "tune":"animation",
         }
