@@ -1129,7 +1129,7 @@ def run_inference(
     # Trim and clean up the prompt for filename use
     prompt_map = region_condi_list[0]["prompt_map"]
     prompt_tags = [re_clean_prompt.sub("", tag).strip().replace(" ", "-") for tag in prompt_map[list(prompt_map.keys())[0]].split(",")]
-    prompt_str = "_".join((prompt_tags[:6]))[:50]
+    prompt_str = "_".join((prompt_tags[:6]))[:100]
     frame_dir = out_dir.joinpath(f"{idx:02d}-{seed}")
     out_file = out_dir.joinpath(f"{idx:02d}_{seed}_{prompt_str}")
 
