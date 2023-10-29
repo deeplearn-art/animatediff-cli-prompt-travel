@@ -8,6 +8,20 @@ It seems to work surprisingly well!
 
 ### Example
 
+- region prompt(txt2img / no controlnet)
+- region 0 ... 1girl, upper body etc
+- region 1 ... ((car)), street, road,no human etc
+- background ... town, outdoors etc
+- ip adapter input for background / region 0 / region 1
+<img src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/ca355f4b-f4c0-4405-88f4-1c80632e32a6" width="512">
+
+- animatediff generate -c config/prompts/region_txt2img.json -W 512 -H 768 -L 32 -C 16
+- region 0 mask / region 1 mask / txt2img
+
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/88eb1572-2772-4d76-89c1-c6bf8142283d" muted="false"></video></div>
+<br>
+
+
 - img2img
 - This can be improved using controlnet, but this sample does not use it.
 - source / denoising_strength 0.7 / denoising_strength 0.85
