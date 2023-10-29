@@ -834,7 +834,8 @@ def region_preprocess(
     region_list=[
         {
             "mask_images": None,
-            "src" : bg_src
+            "src" : bg_src,
+            "crop_generation_rate" : 0
         }
     ]
 
@@ -893,7 +894,8 @@ def region_preprocess(
             region_list.append(
                 {
                     "mask_images": mask_map,
-                    "src" : src
+                    "src" : src,
+                    "crop_generation_rate" : model_config.region_map[r]["crop_generation_rate"] if "crop_generation_rate" in model_config.region_map[r] else 0
                 }
             )
 

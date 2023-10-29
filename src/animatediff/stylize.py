@@ -1641,6 +1641,7 @@ def create_region(
 
             region_map[str(i)]={
                 "enable": True,
+                "crop_generation_rate": 0.0,
                 "mask_dir" : os.path.relpath(mask_dir.absolute(), data_dir),
                 "save_mask": True,
                 "is_init_img" : False,

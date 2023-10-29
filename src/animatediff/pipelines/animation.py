@@ -393,10 +393,42 @@ class RegionMask:
             width // vae_scale_factor,
         )
 
+        def get_area(m:torch.Tensor):
+            area = torch.where(m == 1)
+            if len(area) == 0:
+                return (0,0,0,0)
+
+            ymin = min(area[0])
+            ymax = max(area[0])
+            xmin = min(area[1])
+            xmax = max(area[1])
+            h = ymax+1 - ymin
+            w = xmax+1 - xmin
+
+            mod_h = (h + 7) // 8 * 8
+            diff_h = mod_h - h
+            ymin -= diff_h
+            if ymin < 0:
+                ymin = 0
+            h = mod_h
+
+            mod_w = (w + 7) // 8 * 8
+            diff_w = mod_w - w
+            xmin -= diff_w
+            if xmin < 0:
+                xmin = 0
+            w = mod_w
+
+            return (int(xmin), int(ymin), int(w), int(h))
+
+
         for r in region_list:
             mask_latents = torch.zeros(shape)
             cur = r["mask_images"]
+            area_info = None
             if cur:
+                area_info = [ (0,0,0,0) for l in range(video_length)]
+
                 for frame_no in cur:
                     mask = cur[frame_no]
                     mask = np.array(mask.convert("L"))[None, None, :]
@@ -407,6 +439,7 @@ class RegionMask:
                     mask = torch.nn.functional.interpolate(
                         mask, size=(height // vae_scale_factor, width // vae_scale_factor)
                     )
+                    area_info[frame_no] = get_area(mask[0][0])
 
                     mask_latents[:,:,frame_no,:,:] = mask
             else:
@@ -414,8 +447,15 @@ class RegionMask:
 
             r["mask_latents"] = mask_latents.to(device=device, dtype=dtype, non_blocking=True)
             r["mask_images"] = None
+            r["area"] = area_info
 
         self.region_list = region_list
+
+        self.cond2region = {}
+        for i,r in enumerate(self.region_list):
+            if r["src"] != -1:
+                self.cond2region[r["src"]] = i
+
 
     def get_mask(
             self,
@@ -423,6 +463,49 @@ class RegionMask:
         ):
         return self.region_list[region_index]["mask_latents"]
 
+    def get_area(
+            self,
+            cond_layer,
+            frame_no,
+        ):
+
+        if cond_layer == 0:
+            return None
+
+        cond_layer -= 1
+
+        if cond_layer not in self.cond2region:
+            return None
+
+        region_index = self.cond2region[cond_layer]
+
+        if region_index == -1:
+            return None
+
+        if self.region_list[region_index]["area"]:
+            return self.region_list[region_index]["area"][frame_no]
+        else:
+            return None
+
+    def get_crop_generation_rate(
+            self,
+            cond_layer,
+        ):
+
+        if cond_layer == 0:
+            return 0
+
+        cond_layer -= 1
+
+        if cond_layer not in self.cond2region:
+            return 0
+
+        region_index = self.cond2region[cond_layer]
+
+        if region_index == -1:
+            return 0
+
+        return self.region_list[region_index]["crop_generation_rate"]
 
 
 @dataclass
@@ -2805,7 +2888,27 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         __lat = latent_model_input[layer_index:layer_index+unet_batch_size]
                         __cur_prompt = cur_prompt[layer_index * context_frames:(layer_index + unet_batch_size)*context_frames]
 
-                        __pred.append( self.unet(
+                        area = None
+
+                        if i < len(timesteps) * region_mask.get_crop_generation_rate(layer_index):
+                            area = region_mask.get_area(layer_index, context[0])
+
+                            if area:
+                                pred_tmp = __lat.clone()
+                                a_x, a_y, a_w, a_h = area
+                                __lat = __lat[:,:,:,a_y:a_y+a_h, a_x:a_x+a_w ]
+
+                                if __do is not None:
+                                    __tmp_do = []
+                                    for _d, rate in zip(__do, (1,1,1,2,2,2,4,4,4,8,8,8)):
+                                        __tmp_do.append( _d[:,:,:,a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+                                    __do = __tmp_do
+
+                                if __mid is not None:
+                                    rate = 8
+                                    __mid = __mid[:,:,:,a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ]
+
+                        pred_layer = self.unet(
                             __lat.to(self.unet.device, self.unet.dtype),
                             t,
                             encoder_hidden_states=__cur_prompt,
@@ -2813,7 +2916,16 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             down_block_additional_residuals=__do,
                             mid_block_additional_residual=__mid,
                             return_dict=False,
-                        )[0] )
+                        )[0]
+
+                        if area:
+                            pred_tmp = pred_tmp.to(device=pred_layer.device, dtype=pred_layer.dtype)
+                            a_x, a_y, a_w, a_h = area
+                            pred_tmp[:,:,:,a_y:a_y+a_h, a_x:a_x+a_w] = pred_layer
+                            pred_layer = pred_tmp
+
+                        __pred.append( pred_layer )
+
 
                     pred = torch.cat(__pred)
 
