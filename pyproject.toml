@@ -9,6 +9,7 @@ write_to = "src/animatediff/_version.py"
 line-length = 110
 target-version = ['py310']
 ignore = ['F841', 'F401', 'E501']
+preview = true
 
 [tool.ruff]
 line-length = 110

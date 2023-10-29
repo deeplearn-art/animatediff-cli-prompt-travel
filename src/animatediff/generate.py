@@ -2,9 +2,11 @@ import glob
 import logging
 import os
 import re
+from functools import partial
+from itertools import chain
 from os import PathLike
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Callable, Dict, List, Union
 
 import numpy as np
 import torch
@@ -17,6 +19,7 @@ from diffusers import (AutoencoderKL, ControlNetModel, DiffusionPipeline,
                        StableDiffusionControlNetImg2ImgPipeline,
                        StableDiffusionPipeline)
 from PIL import Image
+from torchvision.datasets.folder import IMG_EXTENSIONS
 from tqdm.rich import tqdm
 from transformers import (AutoImageProcessor, CLIPImageProcessor,
                           CLIPTextModel, CLIPTokenizer,
@@ -709,7 +712,7 @@ def ip_adapter_preprocess(
         if ip_adapter_config_map["enable"] == True:
             resized_to_square = ip_adapter_config_map["resized_to_square"] if "resized_to_square" in ip_adapter_config_map else False
             image_dir = data_dir.joinpath( ip_adapter_config_map["input_image_dir"] )
-            imgs = sorted(glob.glob( os.path.join(image_dir, "[0-9]*.png"), recursive=False))
+            imgs = sorted(chain.from_iterable([glob.glob(os.path.join(image_dir, f"[0-9]*{ext}")) for ext in IMG_EXTENSIONS]))
             if len(imgs) > 0:
                 prepare_ip_adapter()
                 ip_adapter_map["images"] = {}
@@ -1123,12 +1126,30 @@ def run_inference(
 ):
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 
+    # Trim and clean up the prompt for filename use
+    prompt_map = region_condi_list[0]["prompt_map"]
+    prompt_tags = [re_clean_prompt.sub("", tag).strip().replace(" ", "-") for tag in prompt_map[list(prompt_map.keys())[0]].split(",")]
+    prompt_str = "_".join((prompt_tags[:6]))[:50]
+    frame_dir = out_dir.joinpath(f"{idx:02d}-{seed}")
+    out_file = out_dir.joinpath(f"{idx:02d}_{seed}_{prompt_str}")
+
+    def preview_callback(i: int, video: torch.Tensor, save_fn: Callable[[torch.Tensor], None], out_file: str) -> None:
+        save_fn(video, out_file=Path(f"{out_file}_preview@{i}"))
+
+    save_fn = partial(
+        save_output,
+        frame_dir=frame_dir,
+        output_map=output_map,
+        no_frames=no_frames,
+        save_frames=partial(save_frames, show_progress=False),
+        save_video=save_video
+    )
+    callback = partial(preview_callback, save_fn=save_fn, out_file=out_file)
+
     seed_everything(seed)
 
     logger.info(f"{len( region_condi_list )=}")
-#    logger.info(f"{region_condi_list=}")
     logger.info(f"{len( region_list )=}")
-#    logger.info(f"{region_list=}")
 
     pipeline_output = pipeline(
         negative_prompt=n_prompt,
@@ -1156,20 +1177,12 @@ def run_inference(
         region_condi_list=region_condi_list,
         interpolation_factor=1,
         is_single_prompt_mode=is_single_prompt_mode,
+        callback=callback,
+        callback_steps=output_map.get("preview_steps"),
     )
-
     logger.info("Generation complete, saving...")
 
-    prompt_map = region_condi_list[0]["prompt_map"]
-
-    # Trim and clean up the prompt for filename use
-    prompt_tags = [re_clean_prompt.sub("", tag).strip().replace(" ", "-") for tag in prompt_map[list(prompt_map.keys())[0]].split(",")]
-    prompt_str = "_".join((prompt_tags[:6]))[:50]
-
-    frame_dir = out_dir.joinpath(f"{idx:02d}-{seed}")
-    out_file = out_dir.joinpath(f"{idx:02d}_{seed}_{prompt_str}")
-
-    save_output( pipeline_output, frame_dir, out_file, output_map, no_frames, save_frames, save_video )
+    save_fn(pipeline_output, out_file=out_file)
 
     logger.info(f"Saved sample to {out_file}")
     return pipeline_output
