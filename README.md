@@ -214,6 +214,8 @@ Almost same as the original animatediff-cli, but with a slight change in config 
       "0": {
           # enable/disable
           "enable": true,
+          # If you want to draw a separate object for each region, enter a value of 0.1 or higher.
+          "crop_generation_rate": 0.1,
           # Directory where mask images are placed
           "mask_dir": "..\\stylize\\2023-10-27T19-43-01-sample-mistoonanime_v20\\r_fg_00_2023-10-27T19-44-08\\00_mask",
           "save_mask": true,
