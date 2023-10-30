@@ -22,6 +22,12 @@ It seems to work surprisingly well!
 <br>
 
 
+
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/55042dff-4e23-43b9-b4d6-6f2228b943d2" muted="false"></video></div>
+<br>
+
+
+
 - img2img
 - This can be improved using controlnet, but this sample does not use it.
 - source / denoising_strength 0.7 / denoising_strength 0.85
@@ -211,6 +217,7 @@ Almost same as the original animatediff-cli, but with a slight change in config 
   },
   "region_map": {
       # setting for region 0. You can also add regions if necessary.
+      # The region added at the back will be drawn at the front.
       "0": {
           # enable/disable
           "enable": true,
