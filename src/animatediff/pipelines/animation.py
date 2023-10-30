@@ -445,9 +445,13 @@ class RegionMask:
             else:
                 mask_latents = torch.ones(shape)
 
+            w = mask_latents.shape[4]
+            h = mask_latents.shape[3]
+
             r["mask_latents"] = mask_latents.to(device=device, dtype=dtype, non_blocking=True)
             r["mask_images"] = None
             r["area"] = area_info
+            r["latent_size"] = (w, h)
 
         self.region_list = region_list
 
@@ -466,26 +470,42 @@ class RegionMask:
     def get_area(
             self,
             cond_layer,
-            frame_no,
+            context,
         ):
 
         if cond_layer == 0:
-            return None
+            return None,None
 
         cond_layer -= 1
 
         if cond_layer not in self.cond2region:
-            return None
+            return None,None
 
         region_index = self.cond2region[cond_layer]
 
         if region_index == -1:
-            return None
+            return None,None
+
+        _,_,w,h = self.region_list[region_index]["area"][context[0]]
+
+        l_w, l_h = self.region_list[region_index]["latent_size"]
+
+        xy_list = []
+        for c in context:
+            x,y,_,_ = self.region_list[region_index]["area"][c]
+
+            if x + w > l_w:
+                x -= (x+w - l_w)
+            if y + h > l_h:
+                y -= (y+h - l_h)
+
+            xy_list.append( (x,y) )
+
 
         if self.region_list[region_index]["area"]:
-            return self.region_list[region_index]["area"][frame_no]
+            return (w,h), xy_list
         else:
-            return None
+            return None,None
 
     def get_crop_generation_rate(
             self,
@@ -2888,26 +2908,6 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         __lat = latent_model_input[layer_index:layer_index+unet_batch_size]
                         __cur_prompt = cur_prompt[layer_index * context_frames:(layer_index + unet_batch_size)*context_frames]
 
-                        area = None
-
-                        if i < len(timesteps) * region_mask.get_crop_generation_rate(layer_index):
-                            area = region_mask.get_area(layer_index, context[0])
-
-                            if area:
-                                pred_tmp = __lat.clone()
-                                a_x, a_y, a_w, a_h = area
-                                __lat = __lat[:,:,:,a_y:a_y+a_h, a_x:a_x+a_w ]
-
-                                if __do is not None:
-                                    __tmp_do = []
-                                    for _d, rate in zip(__do, (1,1,1,2,2,2,4,4,4,8,8,8)):
-                                        __tmp_do.append( _d[:,:,:,a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
-                                    __do = __tmp_do
-
-                                if __mid is not None:
-                                    rate = 8
-                                    __mid = __mid[:,:,:,a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ]
-
                         pred_layer = self.unet(
                             __lat.to(self.unet.device, self.unet.dtype),
                             t,
@@ -2918,13 +2918,56 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             return_dict=False,
                         )[0]
 
-                        if area:
-                            pred_tmp = pred_tmp.to(device=pred_layer.device, dtype=pred_layer.dtype)
-                            a_x, a_y, a_w, a_h = area
-                            pred_tmp[:,:,:,a_y:a_y+a_h, a_x:a_x+a_w] = pred_layer
-                            pred_layer = pred_tmp
+                        wh = None
+
+                        if i < len(timesteps) * region_mask.get_crop_generation_rate(layer_index):
+                            wh, xy_list = region_mask.get_area(layer_index, context)
+                            if wh:
+                                a_w, a_h = wh
+                                __lat_list = []
+                                for c_index, xy in enumerate( xy_list ):
+                                    a_x, a_y = xy
+                                    __lat_list.append( __lat[:,:,[c_index],a_y:a_y+a_h, a_x:a_x+a_w ] )
+
+                                __lat = torch.cat(__lat_list, dim=2)
+
+                                if __do is not None:
+                                    __tmp_do = []
+                                    for _d, rate in zip(__do, (1,1,1,2,2,2,4,4,4,8,8,8)):
+                                        _inner_do_list = []
+                                        for c_index, xy in enumerate( xy_list ):
+                                            a_x, a_y = xy
+                                            _inner_do_list.append(_d[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+
+                                        __tmp_do.append( torch.cat(_inner_do_list, dim=2) )
+                                    __do = __tmp_do
+
+                                if __mid is not None:
+                                    rate = 8
+                                    _mid_list = []
+                                    for c_index, xy in enumerate( xy_list ):
+                                        a_x, a_y = xy
+                                        _mid_list.append( __mid[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+                                    __mid = torch.cat(_mid_list, dim=2)
+
+                            crop_pred_layer = self.unet(
+                                __lat.to(self.unet.device, self.unet.dtype),
+                                t,
+                                encoder_hidden_states=__cur_prompt,
+                                cross_attention_kwargs=cross_attention_kwargs,
+                                down_block_additional_residuals=__do,
+                                mid_block_additional_residual=__mid,
+                                return_dict=False,
+                            )[0]
+
+                            if wh:
+                                a_w, a_h = wh
+                                for c_index, xy in enumerate( xy_list ):
+                                    a_x, a_y = xy
+                                    pred_layer[:,:,[c_index],a_y:a_y+a_h, a_x:a_x+a_w] = crop_pred_layer[:,:,[c_index],:,:]
 
                         __pred.append( pred_layer )
+
 
 
                     pred = torch.cat(__pred)
