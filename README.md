@@ -38,8 +38,9 @@ It seems to work surprisingly well!
 - [A command to stylization with region has been added](https://github.com/s9roll7/animatediff-cli-prompt-travel#video-stylization-with-region).
 - (You can also create json manually without using the stylize command.)
 - region prompt
-- source / Region division on left and right / Region division into cat shapes
-<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/333f7891-645a-42f7-bb5c-234c00fe64fb" muted="false"></video></div>
+- Region division into person shapes
+- source / img2img / txt2img
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/10101ab8-39cc-4dbc-85c8-af558f80c6fe" muted="false"></video></div>
 <br>
 
 - source / Region division into person shapes / inpaint
@@ -421,6 +422,8 @@ animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4
 # create config file from src video (img2img)
 animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4 -i2i
 
+# If you have less than 12GB of vram, specify low vram mode
+animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4 -lo
 
 # Edit the config file by referring to the hint displayed in the log when the command finishes
 # It is recommended to specify a short length for the test run
@@ -450,6 +453,9 @@ python -m pip install -e .[stylize_mask]
 animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4
 # for img2img
 animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4 -i2i
+
+# If you have less than 12GB of vram, specify low vram mode
+animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4 -lo
 ```
 ```json
 # in prompt.json (generated in [1])
@@ -517,6 +523,9 @@ python -m pip install -e .[stylize_mask]
 
 # [1] create config file from src video
 animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4
+
+# If you have less than 12GB of vram, specify low vram mode
+animatediff stylize create-config YOUR_SRC_MOVIE_FILE.mp4 -lo
 ```
 ```json
 # in prompt.json (generated in [1])
