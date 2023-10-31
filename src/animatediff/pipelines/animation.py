@@ -395,7 +395,7 @@ class RegionMask:
 
         def get_area(m:torch.Tensor):
             area = torch.where(m == 1)
-            if len(area) == 0:
+            if len(area[0]) == 0 or len(area[1]) == 0:
                 return (0,0,0,0)
 
             ymin = min(area[0])
@@ -2731,6 +2731,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     controlnet_result = {key: controlnet_result[key] for key in loc}
 
                     target_frames = list(set(target_frames) - set(loc))
+                    #logger.info(f"-> {target_frames=}")
+                    if len(target_frames) == 0:
+                        return
 
                     def sample_to_device( sample ):
                         nonlocal controlnet_samples_on_vram
@@ -2969,6 +2972,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         __pred.append( pred_layer )
 
 
+                    down_block_res_samples = None
+                    mid_block_res_sample = None
+
 
                     pred = torch.cat(__pred)
 
@@ -3041,6 +3047,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 tmp_latent = None
 
                 stopwatch_stop("LOOP end")
+
+        controlnet_result = None
+        torch.cuda.empty_cache()
 
         if c_ref_enable:
             self.unload_controlnet_ref_only(
