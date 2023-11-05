@@ -19,11 +19,37 @@ It seems to work surprisingly well!
 - region 0 mask / region 1 mask / txt2img
 
 <div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/88eb1572-2772-4d76-89c1-c6bf8142283d" muted="false"></video></div>
-<br>
 
 
 
 <div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/55042dff-4e23-43b9-b4d6-6f2228b943d2" muted="false"></video></div>
+<br>
+
+- apply different lora for each region.
+- [abdiel](https://civitai.com/models/159943/abdiel-shin-megami-tensei-v-v) for region 0
+- [amanozoko](https://civitai.com/models/159933/amanozoko-shin-megami-tensei-v-v) for region 1
+- no lora for background
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/a5260cf0-1f96-4c65-8408-805428d2528e" muted="false"></video></div>
+
+```json
+  # new lora_map format
+  "lora_map": {
+        "path_to_models/models/Lora/zs_Abdiel.safetensors": {   # setting for abdiel lora
+            "region" : ["0"],            # target region. Multiple designations possible
+            "scale" : {
+                # "frame_no" : scale format
+                "0": 0.75           # lora scale. same as prompt_map format. For example, it is possible to set the lora to be used from the 30th frame.
+            }
+        },
+        "path_to_models/models/Lora/zs_Amanazoko.safetensors": {  # setting for amanozako lora
+            "region" : ["1"],            # target region
+            "scale" : {
+                "0": 0.75
+            }
+        }
+  },
+```
+- more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/147)
 <br>
 
 
