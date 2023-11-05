@@ -24,7 +24,7 @@ from diffusers.models import (AutoencoderKL, ControlNetModel, PriorTransformer,
                               UNet2DConditionModel)
 from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import (is_accelerate_available, is_omegaconf_available,
-                             is_safetensors_available, logging)
+                             logging)
 from transformers import CLIPTextConfig, CLIPTextModel
 
 if is_accelerate_available():
@@ -33,6 +33,9 @@ if is_accelerate_available():
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+
+def is_safetensors_available():
+    return True
 
 def shave_segments(path, n_shave_prefix_segments=1):
     """

@@ -111,7 +111,7 @@ class ModelConfig(BaseSettings):
     tail_prompt: str = ""
     n_prompt: list[str] = Field([])  # Anti-prompt(s) to use
     is_single_prompt_mode : bool = Field(False)
-    lora_map: Dict[str,float]= Field({})
+    lora_map: Dict[str,Any]= Field({})
     motion_lora_map: Dict[str,float]= Field({})
     ip_adapter_map: Dict[str,Any]= Field({})
     img2img_map: Dict[str,Any]= Field({})

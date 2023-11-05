@@ -56,6 +56,9 @@ def send_to_device(
                 #pipeline.controlnet_map[c] = pipeline.controlnet_map[c].to(device=device, dtype=unet_dtype, memory_format=model_memory_format)
                 pipeline.controlnet_map[c] = pipeline.controlnet_map[c].to(dtype=unet_dtype, memory_format=model_memory_format)
 
+    if hasattr(pipeline, 'lora_map'):
+        if pipeline.lora_map:
+            pipeline.lora_map.to(device=device, dtype=unet_dtype)
 
     pipeline.unet = pipeline.unet.to(device=device, dtype=unet_dtype, memory_format=model_memory_format)
     pipeline.text_encoder = pipeline.text_encoder.to(device=device, dtype=tenc_dtype)

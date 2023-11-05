@@ -8,7 +8,8 @@ import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models import ModelMixin
 from diffusers.models.attention import AdaLayerNorm, Attention, FeedForward
-from diffusers.utils import BaseOutput, maybe_allow_in_graph
+from diffusers.utils import BaseOutput
+from diffusers.utils.torch_utils import maybe_allow_in_graph
 from einops import rearrange, repeat
 from torch import Tensor, nn
 

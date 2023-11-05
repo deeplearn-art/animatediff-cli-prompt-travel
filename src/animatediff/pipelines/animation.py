@@ -18,8 +18,8 @@ from diffusers.schedulers import (DDIMScheduler, DPMSolverMultistepScheduler,
                                   EulerDiscreteScheduler, LMSDiscreteScheduler,
                                   PNDMScheduler)
 from diffusers.utils import (BaseOutput, deprecate, is_accelerate_available,
-                             is_accelerate_version, is_compiled_module,
-                             randn_tensor)
+                             is_accelerate_version)
+from diffusers.utils.torch_utils import is_compiled_module, randn_tensor
 from einops import rearrange
 from packaging import version
 from tqdm.rich import tqdm
@@ -67,11 +67,19 @@ class PromptEncoder:
             region_condi_list,
             negative_prompt,
             is_signle_prompt_mode,
-            clip_skip
+            clip_skip,
+            multi_uncond_mode
         ):
         self.pipe = pipe
         self.is_single_prompt_mode=is_signle_prompt_mode
         self.do_classifier_free_guidance = do_classifier_free_guidance
+
+        uncond_num = 0
+        if do_classifier_free_guidance:
+            if multi_uncond_mode:
+                uncond_num = len(region_condi_list)
+            else:
+                uncond_num = 1
 
         ### text
 
@@ -116,11 +124,11 @@ class PromptEncoder:
         prompt_embeds_region_list = []
 
         if do_classifier_free_guidance:
-            prompt_embeds_region_list.append(
+            prompt_embeds_region_list = [
                 {
                     0:negative[0]
                 }
-            )
+            ] * uncond_num + prompt_embeds_region_list
 
         pos_index = 0
         for prompt_map, num in zip(prompt_map_list, prompt_nums):
@@ -138,7 +146,7 @@ class PromptEncoder:
                 {
                     0:negative_prompt
                 }
-            ] + prompt_map_list
+            ] * uncond_num + prompt_map_list
 
         self.prompt_map_list = prompt_map_list
         self.prompt_embeds_region_list = prompt_embeds_region_list
@@ -180,11 +188,11 @@ class PromptEncoder:
             im_prompt_embeds_region_list = []
 
             if do_classifier_free_guidance:
-                im_prompt_embeds_region_list.append(
+                im_prompt_embeds_region_list = [
                     {
                         0:negative[0]
                     }
-                )
+                ] * uncond_num + im_prompt_embeds_region_list
 
             pos_index = 0
             for ip_im_map, num in zip(ip_im_map_list, ip_im_nums):
@@ -203,7 +211,7 @@ class PromptEncoder:
                     {
                         0:None
                     }
-                ] + ip_im_map_list
+                ] * uncond_num + ip_im_map_list
 
 
             self.ip_im_map_list = ip_im_map_list
@@ -383,7 +391,8 @@ class RegionMask:
             width,
             vae_scale_factor,
             dtype,
-            device
+            device,
+            multi_uncond_mode
         ):
         shape = (
             batch_size,
@@ -455,6 +464,8 @@ class RegionMask:
 
         self.region_list = region_list
 
+        self.multi_uncond_mode = multi_uncond_mode
+
         self.cond2region = {}
         for i,r in enumerate(self.region_list):
             if r["src"] != -1:
@@ -470,13 +481,18 @@ class RegionMask:
     def get_area(
             self,
             cond_layer,
+            cond_nums,
             context,
         ):
 
-        if cond_layer == 0:
-            return None,None
+        if self.multi_uncond_mode:
+            cond_layer = cond_layer if cond_layer < cond_nums//2 else cond_layer - cond_nums//2
+        else:
+            if cond_layer == 0:
+                return None,None
 
-        cond_layer -= 1
+            cond_layer -= 1
+
 
         if cond_layer not in self.cond2region:
             return None,None
@@ -510,12 +526,17 @@ class RegionMask:
     def get_crop_generation_rate(
             self,
             cond_layer,
+            cond_nums,
         ):
 
-        if cond_layer == 0:
-            return 0
+        if self.multi_uncond_mode:
+            cond_layer = cond_layer if cond_layer < cond_nums//2 else cond_layer - cond_nums//2
+        else:
+            if cond_layer == 0:
+                return 0
 
-        cond_layer -= 1
+            cond_layer -= 1
+
 
         if cond_layer not in self.cond2region:
             return 0
@@ -2361,6 +2382,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         sequential_mode = video_length is not None and video_length > context_frames
 
+        multi_uncond_mode = self.lora_map is not None
+        logger.info(f"{multi_uncond_mode=}")
+
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
             "dummy string", height, width, callback_steps, negative_prompt, prompt_embeds, negative_prompt_embeds
@@ -2406,13 +2430,17 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             region_condi_list,
             negative_prompt,
             is_single_prompt_mode,
-            clip_skip
+            clip_skip,
+            multi_uncond_mode
         )
 
 
         if controlnet_ref_map is not None:
             if unet_batch_size < prompt_encoder.get_condi_size():
                 raise ValueError(f"controlnet_ref is not available in this configuration. {unet_batch_size=} < {prompt_encoder.get_condi_size()}")
+            if multi_uncond_mode:
+                raise ValueError(f"controlnet_ref is not available in this configuration. {multi_uncond_mode=}")
+
 
 
         # 3.5 Prepare controlnet variables
@@ -2586,6 +2614,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             self.vae_scale_factor,
             prompt_encoder.get_prompt_embeds_dtype(),
             latents_device,
+            multi_uncond_mode
         )
 
         torch.cuda.empty_cache()
@@ -2841,6 +2870,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 for context in context_scheduler(
                     i, num_inference_steps, latents.shape[2], context_frames, context_stride, context_overlap
                 ):
+
+                    stopwatch_record("lora_map UNapply start")
+                    if self.lora_map:
+                        self.lora_map.unapply()
+                    stopwatch_record("lora_map UNapply end")
+
                     if controlnet_image_map:
                         controlnet_target = list(range(context[0]-context_frames, context[0])) + context + list(range(context[-1]+1, context[-1]+1+context_frames))
                         controlnet_target = [f%video_length for f in controlnet_target]
@@ -2897,6 +2932,10 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     __pred = []
 
                     for layer_index in range(0, latent_model_input.shape[0], unet_batch_size):
+
+                        if self.lora_map:
+                            self.lora_map.apply(layer_index, latent_model_input.shape[0], context[len(context)//2])
+
                         __do = []
                         if down_block_res_samples is not None:
                             for do in down_block_res_samples:
@@ -2911,6 +2950,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         __lat = latent_model_input[layer_index:layer_index+unet_batch_size]
                         __cur_prompt = cur_prompt[layer_index * context_frames:(layer_index + unet_batch_size)*context_frames]
 
+                        stopwatch_record("self.unet start")
                         pred_layer = self.unet(
                             __lat.to(self.unet.device, self.unet.dtype),
                             t,
@@ -2920,11 +2960,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             mid_block_additional_residual=__mid,
                             return_dict=False,
                         )[0]
+                        stopwatch_record("self.unet end")
 
                         wh = None
 
-                        if i < len(timesteps) * region_mask.get_crop_generation_rate(layer_index):
-                            wh, xy_list = region_mask.get_area(layer_index, context)
+                        if i < len(timesteps) * region_mask.get_crop_generation_rate(layer_index, latent_model_input.shape[0]):
+                            wh, xy_list = region_mask.get_area(layer_index, latent_model_input.shape[0], context)
                             if wh:
                                 a_w, a_h = wh
                                 __lat_list = []
@@ -2953,6 +2994,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                         _mid_list.append( __mid[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
                                     __mid = torch.cat(_mid_list, dim=2)
 
+                            stopwatch_record("crop self.unet start")
                             crop_pred_layer = self.unet(
                                 __lat.to(self.unet.device, self.unet.dtype),
                                 t,
@@ -2962,6 +3004,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 mid_block_additional_residual=__mid,
                                 return_dict=False,
                             )[0]
+                            stopwatch_record("crop self.unet end")
 
                             if wh:
                                 a_w, a_h = wh
@@ -2991,9 +3034,16 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 if do_classifier_free_guidance:
                     noise_pred = (noise_pred / counter)
                     noise_list = list(noise_pred.chunk( noise_size ))
-                    noise_pred_uncond = noise_list.pop(0)
-                    for n in range(len(noise_list)):
-                        noise_list[n] = noise_pred_uncond + guidance_scale * (noise_list[n] - noise_pred_uncond)
+
+                    if multi_uncond_mode:
+                        uc_noise_list = noise_list[:len(noise_list)//2]
+                        noise_list = noise_list[len(noise_list)//2:]
+                        for n in range(len(noise_list)):
+                            noise_list[n] = uc_noise_list[n] + guidance_scale * (noise_list[n] - uc_noise_list[n])
+                    else:
+                        noise_pred_uncond = noise_list.pop(0)
+                        for n in range(len(noise_list)):
+                            noise_list[n] = noise_pred_uncond + guidance_scale * (noise_list[n] - noise_pred_uncond)
                     noise_size = len(noise_list)
                     noise_pred = torch.cat(noise_list)
 

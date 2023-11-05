@@ -18,7 +18,8 @@ from diffusers.pipelines.stable_diffusion import (
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import (PIL_INTERPOLATION, deprecate,
                              is_accelerate_available, is_accelerate_version,
-                             logging, randn_tensor)
+                             logging)
+from diffusers.utils.torch_utils import randn_tensor
 from packaging import version
 from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer
 

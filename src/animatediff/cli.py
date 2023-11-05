@@ -74,6 +74,19 @@ else:
 logger = logging.getLogger(__name__)
 
 
+from importlib.metadata import version as meta_version
+
+from packaging import version
+
+diffuser_ver = meta_version('diffusers')
+
+logger.info(f"{diffuser_ver=}")
+
+if version.parse(diffuser_ver) < version.parse('0.21.2'):
+    logger.error(f"The version of diffusers is out of date")
+    logger.error(f"python -m pip install diffusers==0.21.2")
+    raise ImportError("Please update diffusers to 0.21.2")
+
 try:
     from animatediff.rife import app as rife_app
 
@@ -328,6 +341,7 @@ def generate(
             model_config=model_config,
             infer_config=infer_config,
             use_xformers=use_xformers,
+            video_length=length,
         )
         last_model_path = model_config.path.resolve()
     else:

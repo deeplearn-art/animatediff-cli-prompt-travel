@@ -30,6 +30,7 @@ from animatediff.dwpose import DWposeDetector
 from animatediff.models.clip import CLIPSkipTextModel
 from animatediff.models.unet import UNet3DConditionModel
 from animatediff.pipelines import AnimationPipeline, load_text_embeddings
+from animatediff.pipelines.lora import load_lora_map
 from animatediff.pipelines.pipeline_controlnet_img2img_reference import \
     StableDiffusionControlNetImg2ImgReferencePipeline
 from animatediff.schedulers import get_scheduler
@@ -75,7 +76,24 @@ def load_safetensors_lora(text_encoder, unet, lora_path, alpha=0.75, is_animated
     lora_network: LoRANetwork = create_network_from_weights(text_encoder, unet, sd, multiplier=alpha, is_animatediff=is_animatediff)
     print(f"load LoRA network weights")
     lora_network.load_state_dict(sd, False)
+    #lora_network.merge_to(alpha)
+    lora_network.apply_to(alpha)
+    return lora_network
+
+def load_safetensors_lora2(text_encoder, unet, lora_path, alpha=0.75, is_animatediff=True):
+    from safetensors.torch import load_file
+
+    from animatediff.utils.lora_diffusers import (LoRANetwork,
+                                                  create_network_from_weights)
+
+    sd = load_file(lora_path)
+
+    print(f"create LoRA network")
+    lora_network: LoRANetwork = create_network_from_weights(text_encoder, unet, sd, multiplier=alpha, is_animatediff=is_animatediff)
+    print(f"load LoRA network weights")
+    lora_network.load_state_dict(sd, False)
     lora_network.merge_to(alpha)
+
 
 def load_tensors(path:Path,framework="pt",device="cpu"):
     tensors = {}
@@ -323,6 +341,7 @@ def create_pipeline(
     model_config: ModelConfig = ...,
     infer_config: InferenceConfig = ...,
     use_xformers: bool = True,
+    video_length: int = 16,
 ) -> AnimationPipeline:
     """Create an AnimationPipeline from a pretrained model.
     Uses the base_model argument to load or download the pretrained reference pipeline model."""
@@ -412,13 +431,14 @@ def create_pipeline(
         logger.info("Enabling xformers memory-efficient attention")
         unet.enable_xformers_memory_efficient_attention()
 
-    # lora
-    for l in model_config.lora_map:
-        lora_path = data_dir.joinpath(l)
-        if lora_path.is_file():
-            logger.info(f"Loading lora {lora_path}")
-            logger.info(f"alpha = {model_config.lora_map[l]}")
-            load_safetensors_lora(text_encoder, unet, lora_path, alpha=model_config.lora_map[l])
+    if False:
+        # lora
+        for l in model_config.lora_map:
+            lora_path = data_dir.joinpath(l)
+            if lora_path.is_file():
+                logger.info(f"Loading lora {lora_path}")
+                logger.info(f"alpha = {model_config.lora_map[l]}")
+                load_safetensors_lora(text_encoder, unet, lora_path, alpha=model_config.lora_map[l])
 
     # motion lora
     for l in model_config.motion_lora_map:
@@ -438,6 +458,8 @@ def create_pipeline(
         feature_extractor=feature_extractor,
         controlnet_map=None,
     )
+
+    load_lora_map(pipeline, model_config.lora_map, video_length)
 
     # Load TI embeddings
     load_text_embeddings(pipeline)
@@ -577,7 +599,7 @@ def create_us_pipeline(
         if lora_path.is_file():
             logger.info(f"Loading lora {lora_path}")
             logger.info(f"alpha = {model_config.lora_map[l]}")
-            load_safetensors_lora(pipeline.text_encoder, pipeline.unet, lora_path, alpha=model_config.lora_map[l],is_animatediff=False)
+            load_safetensors_lora2(pipeline.text_encoder, pipeline.unet, lora_path, alpha=model_config.lora_map[l],is_animatediff=False)
 
     # Load TI embeddings
     load_text_embeddings(pipeline)
