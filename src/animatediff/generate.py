@@ -597,9 +597,13 @@ def create_us_pipeline(
     for l in model_config.lora_map:
         lora_path = data_dir.joinpath(l)
         if lora_path.is_file():
+            alpha = model_config.lora_map[l]
+            if isinstance(alpha, dict):
+                alpha = 0.75
+
             logger.info(f"Loading lora {lora_path}")
-            logger.info(f"alpha = {model_config.lora_map[l]}")
-            load_safetensors_lora2(pipeline.text_encoder, pipeline.unet, lora_path, alpha=model_config.lora_map[l],is_animatediff=False)
+            logger.info(f"alpha = {alpha}")
+            load_safetensors_lora2(pipeline.text_encoder, pipeline.unet, lora_path, alpha=alpha,is_animatediff=False)
 
     # Load TI embeddings
     load_text_embeddings(pipeline)

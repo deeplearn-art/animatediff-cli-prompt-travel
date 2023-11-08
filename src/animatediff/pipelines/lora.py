@@ -2,10 +2,13 @@ import logging
 
 from safetensors.torch import load_file
 
+from animatediff import get_dir
 from animatediff.utils.lora_diffusers import (LoRANetwork,
                                               create_network_from_weights)
 
 logger = logging.getLogger(__name__)
+
+data_dir = get_dir("data")
 
 
 def merge_safetensors_lora(text_encoder, unet, lora_path, alpha=0.75, is_animatediff=True):
@@ -21,10 +24,11 @@ def merge_safetensors_lora(text_encoder, unet, lora_path, alpha=0.75, is_animate
 def load_lora_map(pipe, lora_map_config, video_length):
     new_map = {}
     for item in lora_map_config:
+        lora_path = data_dir.joinpath(item)
         if type(lora_map_config[item]) in (float,int):
-            merge_safetensors_lora(pipe.text_encoder, pipe.unet, item, lora_map_config[item], True)
+            merge_safetensors_lora(pipe.text_encoder, pipe.unet, lora_path, lora_map_config[item], True)
         else:
-            new_map[item] = lora_map_config[item]
+            new_map[lora_path] = lora_map_config[item]
 
     lora_map = LoraMap(pipe, new_map, video_length)
     pipe.lora_map = lora_map if lora_map.is_valid else None
