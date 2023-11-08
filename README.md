@@ -34,14 +34,15 @@ It seems to work surprisingly well!
 ```json
   # new lora_map format
   "lora_map": {
-        "path_to_models/models/Lora/zs_Abdiel.safetensors": {   # setting for abdiel lora
+        # Specify lora as a path relative to /animatediff-cli/data
+        "share/Lora/zs_Abdiel.safetensors": {   # setting for abdiel lora
             "region" : ["0"],            # target region. Multiple designations possible
             "scale" : {
                 # "frame_no" : scale format
                 "0": 0.75           # lora scale. same as prompt_map format. For example, it is possible to set the lora to be used from the 30th frame.
             }
         },
-        "path_to_models/models/Lora/zs_Amanazoko.safetensors": {  # setting for amanozako lora
+        "share/Lora/zs_Amanazoko.safetensors": {  # setting for amanozako lora
             "region" : ["1"],            # target region
             "scale" : {
                 "0": 0.75
@@ -212,8 +213,8 @@ Almost same as the original animatediff-cli, but with a slight change in config 
     "(worst quality, low quality:1.4),nudity,simple background,border,mouth closed,text, patreon,bed,bedroom,white background,((monochrome)),sketch,(pink body:1.4),7 arms,8 arms,4 arms"
   ],
   "lora_map": {             # "PATH_TO_LORA" : STRENGTH format
-    "path_to_lora/Lora/muffet_v2.safetensors" : 1.0,                     # Specify lora
-    "path_to_lora/Lora/add_detail.safetensors" : 1.0                     # Lora support is limited. Not all formats can be used!!!
+    "share/Lora/muffet_v2.safetensors" : 1.0,                     # Specify lora as a path relative to /animatediff-cli/data
+    "share/Lora/add_detail.safetensors" : 1.0                     # Lora support is limited. Not all formats can be used!!!
   },
   "motion_lora_map": {      # "PATH_TO_LORA" : STRENGTH format
     "models/motion_lora/v2_lora_RollingAnticlockwise.ckpt":0.5,   # Currently, the officially distributed lora seems to work only for v2 motion modules (mm_sd_v15_v2.ckpt).
