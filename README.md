@@ -212,8 +212,8 @@ Almost same as the original animatediff-cli, but with a slight change in config 
     "(worst quality, low quality:1.4),nudity,simple background,border,mouth closed,text, patreon,bed,bedroom,white background,((monochrome)),sketch,(pink body:1.4),7 arms,8 arms,4 arms"
   ],
   "lora_map": {             # "PATH_TO_LORA" : STRENGTH format
-    "share/Lora/muffet_v2.safetensors" : 1.0,                     # Specify lora as a path relative to /animatediff-cli/data
-    "share/Lora/add_detail.safetensors" : 1.0                     # Lora support is limited. Not all formats can be used!!!
+    "path_to_lora/Lora/muffet_v2.safetensors" : 1.0,                     # Specify lora
+    "path_to_lora/Lora/add_detail.safetensors" : 1.0                     # Lora support is limited. Not all formats can be used!!!
   },
   "motion_lora_map": {      # "PATH_TO_LORA" : STRENGTH format
     "models/motion_lora/v2_lora_RollingAnticlockwise.ckpt":0.5,   # Currently, the officially distributed lora seems to work only for v2 motion modules (mm_sd_v15_v2.ckpt).
