@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 
 import torch
+import torch.distributed as dist
 from einops import rearrange
 from PIL import Image
 from torch import Tensor
@@ -11,6 +12,11 @@ from torchvision.utils import save_image
 from tqdm.rich import tqdm
 
 logger = logging.getLogger(__name__)
+
+def zero_rank_print(s):
+    if not isinstance(s, str): s = repr(s)
+    if (not dist.is_initialized()) or (dist.is_initialized() and dist.get_rank() == 0): print("### " + s)
+
 
 def save_frames(video: Tensor, frames_dir: PathLike, show_progress:bool=True):
     frames_dir = Path(frames_dir)
@@ -109,12 +115,59 @@ def get_resized_image2(org_image_path: str, size: int):
     return resize_for_condition_image(image, us_width, us_height)
 
 
-def show_gpu(comment):
-    pass
-#    import GPUtil
-#    torch.cuda.synchronize()
-#    logger.info(comment)
-#    GPUtil.showUtilization()
+def show_bytes(comment, obj):
+    return
+
+    import sys
+#    memory_size = sys.getsizeof(tensor) + torch.numel(tensor)*tensor.element_size()
+
+    if torch.is_tensor(obj):
+        logger.info(f"{comment} : {obj.dtype=}")
+
+        cpu_mem = sys.getsizeof(obj)/1024/1024
+        cpu_mem = 0 if cpu_mem < 1 else cpu_mem
+        logger.info(f"{comment} : CPU {cpu_mem} MB")
+
+        gpu_mem = torch.numel(obj)*obj.element_size()/1024/1024
+        gpu_mem = 0 if gpu_mem < 1 else gpu_mem
+        logger.info(f"{comment} : GPU {gpu_mem} MB")
+    elif type(obj) is tuple:
+        logger.info(f"{comment} : {type(obj)}")
+        cpu_mem = 0
+        gpu_mem = 0
+
+        for o in obj:
+            cpu_mem += sys.getsizeof(o)/1024/1024
+            gpu_mem += torch.numel(o)*o.element_size()/1024/1024
+
+        cpu_mem = 0 if cpu_mem < 1 else cpu_mem
+        logger.info(f"{comment} : CPU {cpu_mem} MB")
+
+        gpu_mem = 0 if gpu_mem < 1 else gpu_mem
+        logger.info(f"{comment} : GPU {gpu_mem} MB")
+
+    else:
+        logger.info(f"{comment} : unknown type")
+
+
+
+def show_gpu(comment=""):
+    return
+    import inspect
+    callerframerecord = inspect.stack()[1]
+    frame = callerframerecord[0]
+    info = inspect.getframeinfo(frame)
+
+    import time
+
+    import GPUtil
+    torch.cuda.synchronize()
+
+#    time.sleep(1.5)
+
+    #logger.info(comment)
+    logger.info(f"{info.filename}/{info.lineno}/{comment}")
+    GPUtil.showUtilization()
 
 
 PROFILE_ON = False
@@ -198,6 +251,29 @@ def prepare_ip_adapter():
             repo_id="h94/IP-Adapter", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/ip_adapter"
         )
 
+def prepare_ip_adapter_sdxl():
+    import os
+    from pathlib import PurePosixPath
+
+    from huggingface_hub import hf_hub_download
+
+    os.makedirs("data/models/ip_adapter/sdxl_models/image_encoder", exist_ok=True)
+    for hub_file in [
+        "sdxl_models/image_encoder/config.json",
+        "sdxl_models/image_encoder/pytorch_model.bin",
+        "sdxl_models/ip-adapter_sdxl.bin"
+    ]:
+        path = Path(hub_file)
+
+        saved_path = "data/models/ip_adapter" / path
+
+        if os.path.exists(saved_path):
+            continue
+
+        hf_hub_download(
+            repo_id="h94/IP-Adapter", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/ip_adapter"
+        )
+
 def prepare_motion_module():
     import os
     from pathlib import PurePosixPath
@@ -207,6 +283,7 @@ def prepare_motion_module():
     os.makedirs("data/models/motion-module", exist_ok=True)
     for hub_file in [
         "mm_sd_v15_v2.ckpt",
+        "mm_sdxl_v10_beta.ckpt",
     ]:
         path = Path(hub_file)
 
@@ -369,7 +446,26 @@ def is_v2_motion_module(motion_module_path:Path):
 
     return is_v2
 
+def is_sdxl_checkpoint(checkpoint_path:Path):
+    if checkpoint_path.suffix == ".safetensors":
+        from safetensors.torch import load_file
+        loaded = load_file(checkpoint_path, "cpu")
+    else:
+        from torch import load
+        loaded = load(checkpoint_path, "cpu")
 
+    is_sdxl = False
+
+    if "conditioner.embedders.1.model.ln_final.weight" in loaded:
+        is_sdxl = True
+    if "conditioner.embedders.0.model.ln_final.weight" in loaded:
+        is_sdxl = True
+
+    loaded = None
+    torch.cuda.empty_cache()
+
+    logger.info(f"{is_sdxl=}")
+    return is_sdxl
 
 
 tensor_interpolation = None

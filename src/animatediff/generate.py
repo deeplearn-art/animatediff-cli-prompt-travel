@@ -16,13 +16,15 @@ from controlnet_aux.processor import Processor as ControlnetPreProcessor
 from controlnet_aux.util import HWC3, ade_palette
 from controlnet_aux.util import resize_image as aux_resize_image
 from diffusers import (AutoencoderKL, ControlNetModel, DiffusionPipeline,
+                       EulerDiscreteScheduler,
                        StableDiffusionControlNetImg2ImgPipeline,
-                       StableDiffusionPipeline)
+                       StableDiffusionPipeline, StableDiffusionXLPipeline)
 from PIL import Image
 from torchvision.datasets.folder import IMG_EXTENSIONS
 from tqdm.rich import tqdm
 from transformers import (AutoImageProcessor, CLIPImageProcessor,
-                          CLIPTextModel, CLIPTokenizer,
+                          CLIPTextConfig, CLIPTextModel,
+                          CLIPTextModelWithProjection, CLIPTokenizer,
                           UperNetForSemanticSegmentation)
 
 from animatediff import get_dir
@@ -38,11 +40,13 @@ from animatediff.settings import InferenceConfig, ModelConfig
 from animatediff.utils.convert_from_ckpt import convert_ldm_vae_checkpoint
 from animatediff.utils.convert_lora_safetensor_to_diffusers import convert_lora
 from animatediff.utils.model import (ensure_motion_modules,
-                                     get_checkpoint_weights)
+                                     get_checkpoint_weights,
+                                     get_checkpoint_weights_sdxl)
 from animatediff.utils.util import (get_resized_image, get_resized_image2,
                                     get_resized_images,
                                     get_tensor_interpolation_method,
                                     prepare_dwpose, prepare_ip_adapter,
+                                    prepare_ip_adapter_sdxl,
                                     prepare_motion_module, save_frames,
                                     save_imgs, save_video)
 
@@ -214,43 +218,77 @@ class TileResamplePreProcessor:
         return Image.fromarray(dst)
 
 
-def create_controlnet_model(type_str):
-    if type_str == "controlnet_tile":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11f1e_sd15_tile')
-    elif type_str == "controlnet_lineart_anime":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15s2_lineart_anime')
-    elif type_str == "controlnet_ip2p":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11e_sd15_ip2p')
-    elif type_str == "controlnet_openpose":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_openpose')
-    elif type_str == "controlnet_softedge":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_softedge')
-    elif type_str == "controlnet_shuffle":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11e_sd15_shuffle')
-    elif type_str == "controlnet_depth":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11f1p_sd15_depth')
-    elif type_str == "controlnet_canny":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_canny')
-    elif type_str == "controlnet_inpaint":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_inpaint')
-    elif type_str == "controlnet_lineart":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_lineart')
-    elif type_str == "controlnet_mlsd":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_mlsd')
-    elif type_str == "controlnet_normalbae":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_normalbae')
-    elif type_str == "controlnet_scribble":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_scribble')
-    elif type_str == "controlnet_seg":
-        return ControlNetModel.from_pretrained('lllyasviel/control_v11p_sd15_seg')
-    elif type_str == "qr_code_monster_v1":
-        return ControlNetModel.from_pretrained('monster-labs/control_v1p_sd15_qrcode_monster')
-    elif type_str == "qr_code_monster_v2":
-        return ControlNetModel.from_pretrained('monster-labs/control_v1p_sd15_qrcode_monster', subfolder='v2')
-    elif type_str =="controlnet_mediapipe_face":
-        return ControlNetModel.from_pretrained("CrucibleAI/ControlNetMediaPipeFace", subfolder="diffusion_sd15")
+controlnet_address_table={
+    "controlnet_tile" : ['lllyasviel/control_v11f1e_sd15_tile'],
+    "controlnet_lineart_anime" : ['lllyasviel/control_v11p_sd15s2_lineart_anime'],
+    "controlnet_ip2p" : ['lllyasviel/control_v11e_sd15_ip2p'],
+    "controlnet_openpose" : ['lllyasviel/control_v11p_sd15_openpose'],
+    "controlnet_softedge" : ['lllyasviel/control_v11p_sd15_softedge'],
+    "controlnet_shuffle" : ['lllyasviel/control_v11e_sd15_shuffle'],
+    "controlnet_depth" : ['lllyasviel/control_v11f1p_sd15_depth'],
+    "controlnet_canny" : ['lllyasviel/control_v11p_sd15_canny'],
+    "controlnet_inpaint" : ['lllyasviel/control_v11p_sd15_inpaint'],
+    "controlnet_lineart" : ['lllyasviel/control_v11p_sd15_lineart'],
+    "controlnet_mlsd" : ['lllyasviel/control_v11p_sd15_mlsd'],
+    "controlnet_normalbae" : ['lllyasviel/control_v11p_sd15_normalbae'],
+    "controlnet_scribble" : ['lllyasviel/control_v11p_sd15_scribble'],
+    "controlnet_seg" : ['lllyasviel/control_v11p_sd15_seg'],
+    "qr_code_monster_v1" : ['monster-labs/control_v1p_sd15_qrcode_monster'],
+    "qr_code_monster_v2" : ['monster-labs/control_v1p_sd15_qrcode_monster', 'v2'],
+    "controlnet_mediapipe_face" : ['CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"],
+}
+
+controlnet_address_table_sdxl={
+#    "controlnet_tile" : ('lllyasviel/control_v11f1e_sd15_tile'),
+#    "controlnet_lineart_anime" : ('lllyasviel/control_v11p_sd15s2_lineart_anime'),
+#    "controlnet_ip2p" : ('lllyasviel/control_v11e_sd15_ip2p'),
+    "controlnet_openpose" : ['thibaud/controlnet-openpose-sdxl-1.0'],
+    "controlnet_softedge" : ['SargeZT/controlnet-sd-xl-1.0-softedge-dexined'],
+#    "controlnet_shuffle" : ('lllyasviel/control_v11e_sd15_shuffle'),
+    "controlnet_depth" : ['diffusers/controlnet-depth-sdxl-1.0-small'],
+    "controlnet_canny" : ['diffusers/controlnet-canny-sdxl-1.0-small'],
+#    "controlnet_inpaint" : ('lllyasviel/control_v11p_sd15_inpaint'),
+#    "controlnet_lineart" : ('lllyasviel/control_v11p_sd15_lineart'),
+#    "controlnet_mlsd" : ('lllyasviel/control_v11p_sd15_mlsd'),
+#    "controlnet_normalbae" : ('lllyasviel/control_v11p_sd15_normalbae'),
+#    "controlnet_scribble" : ('lllyasviel/control_v11p_sd15_scribble'),
+    "controlnet_seg" : ['SargeZT/sdxl-controlnet-seg'],
+    "qr_code_monster_v1" : ['monster-labs/control_v1p_sdxl_qrcode_monster'],
+#    "qr_code_monster_v2" : ('monster-labs/control_v1p_sd15_qrcode_monster', 'v2'),
+#    "controlnet_mediapipe_face" : ('CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"),
+}
+
+
+def is_valid_controlnet_type(type_str, is_sdxl):
+    if not is_sdxl:
+        return type_str in controlnet_address_table
     else:
-        raise ValueError(f"unknown controlnet type {type_str}")
+        return type_str in controlnet_address_table_sdxl
+
+
+
+
+def create_controlnet_model(type_str, is_sdxl):
+    if not is_sdxl:
+        if type_str in controlnet_address_table:
+            addr = controlnet_address_table[type_str]
+            if len(addr) == 1:
+                return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16)
+            else:
+                return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16)
+        else:
+            raise ValueError(f"unknown controlnet type {type_str}")
+    else:
+
+        if type_str in controlnet_address_table_sdxl:
+            addr = controlnet_address_table_sdxl[type_str]
+            if len(addr) == 1:
+                return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16)
+            else:
+                return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16)
+        else:
+            raise ValueError(f"unknown controlnet type {type_str}")
+
 
 
 default_preprocessor_table={
@@ -266,6 +304,8 @@ default_preprocessor_table={
     "controlnet_scribble":"scribble_pidsafe",
     "controlnet_seg":"upernet_seg",
     "controlnet_mediapipe_face":"mediapipe_face",
+    "qr_code_monster_v1":"depth_midas",
+    "qr_code_monster_v2":"depth_midas",
 }
 
 def create_preprocessor_from_name(pre_type):
@@ -336,13 +376,152 @@ def get_preprocessed_img(type_str, img, use_preprocessor, device_str, preprocess
         return img
 
 
+def create_pipeline_sdxl(
+    base_model: Union[str, PathLike] = default_base_path,
+    model_config: ModelConfig = ...,
+    infer_config: InferenceConfig = ...,
+    use_xformers: bool = True,
+    video_length: int = 16,
+    motion_module_path = ...,
+):
+    from animatediff.pipelines.sdxl_animation import AnimationPipeline
+    from animatediff.sdxl_models.unet import UNet3DConditionModel
+
+    logger.info("Loading tokenizer...")
+    tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(base_model, subfolder="tokenizer")
+    logger.info("Loading text encoder...")
+    text_encoder: CLIPTextModel = CLIPTextModel.from_pretrained(base_model, subfolder="text_encoder", torch_dtype=torch.float16)
+    logger.info("Loading VAE...")
+    vae: AutoencoderKL = AutoencoderKL.from_pretrained(base_model, subfolder="vae")
+    logger.info("Loading tokenizer two...")
+    tokenizer_two = CLIPTokenizer.from_pretrained(base_model, subfolder="tokenizer_2")
+    logger.info("Loading text encoder two...")
+    text_encoder_two = CLIPTextModelWithProjection.from_pretrained(base_model, subfolder="text_encoder_2", torch_dtype=torch.float16)
+
+
+    logger.info("Loading UNet...")
+    unet: UNet3DConditionModel = UNet3DConditionModel.from_pretrained_2d(
+        pretrained_model_path=base_model,
+        motion_module_path=motion_module_path,
+        subfolder="unet",
+        unet_additional_kwargs=infer_config.unet_additional_kwargs,
+    )
+
+    # set up scheduler
+    sched_kwargs = infer_config.noise_scheduler_kwargs
+    scheduler = get_scheduler(model_config.scheduler, sched_kwargs)
+    logger.info(f'Using scheduler "{model_config.scheduler}" ({scheduler.__class__.__name__})')
+
+    # Load the checkpoint weights into the pipeline
+    if model_config.path is not None:
+        model_path = data_dir.joinpath(model_config.path)
+        logger.info(f"Loading weights from {model_path}")
+        if model_path.is_file():
+            logger.debug("Loading from single checkpoint file")
+            unet_state_dict, tenc_state_dict, tenc2_state_dict, vae_state_dict = get_checkpoint_weights_sdxl(model_path)
+        elif model_path.is_dir():
+            logger.debug("Loading from Diffusers model directory")
+            temp_pipeline = StableDiffusionXLPipeline.from_pretrained(model_path)
+            unet_state_dict, tenc_state_dict, tenc2_state_dict, vae_state_dict = (
+                temp_pipeline.unet.state_dict(),
+                temp_pipeline.text_encoder.state_dict(),
+                temp_pipeline.text_encoder_2.state_dict(),
+                temp_pipeline.vae.state_dict(),
+            )
+            del temp_pipeline
+        else:
+            raise FileNotFoundError(f"model_path {model_path} is not a file or directory")
+
+        # Load into the unet, TE, and VAE
+        logger.info("Merging weights into UNet...")
+        _, unet_unex = unet.load_state_dict(unet_state_dict, strict=False)
+        if len(unet_unex) > 0:
+            raise ValueError(f"UNet has unexpected keys: {unet_unex}")
+        tenc_missing, _ = text_encoder.load_state_dict(tenc_state_dict, strict=False)
+        if len(tenc_missing) > 0:
+            raise ValueError(f"TextEncoder has missing keys: {tenc_missing}")
+        tenc2_missing, _ = text_encoder_two.load_state_dict(tenc2_state_dict, strict=False)
+        if len(tenc2_missing) > 0:
+            raise ValueError(f"TextEncoder2 has missing keys: {tenc2_missing}")
+        vae_missing, _ = vae.load_state_dict(vae_state_dict, strict=False)
+        if len(vae_missing) > 0:
+            raise ValueError(f"VAE has missing keys: {vae_missing}")
+    else:
+        logger.info("Using base model weights (no checkpoint/LoRA)")
+
+    if model_config.vae_path:
+        vae_path = data_dir.joinpath(model_config.vae_path)
+        logger.info(f"Loading vae from {vae_path}")
+
+        if vae_path.is_dir():
+            vae = AutoencoderKL.from_pretrained(vae_path)
+        else:
+            tensors = load_tensors(vae_path)
+            tensors = convert_ldm_vae_checkpoint(tensors, vae.config)
+            vae.load_state_dict(tensors)
+
+    unet.to(torch.float16)
+    text_encoder.to(torch.float16)
+    text_encoder_two.to(torch.float16)
+
+    del unet_state_dict
+    del tenc_state_dict
+    del tenc2_state_dict
+    del vae_state_dict
+
+    # enable xformers if available
+    if use_xformers:
+        logger.info("Enabling xformers memory-efficient attention")
+        unet.enable_xformers_memory_efficient_attention()
+
+    # motion lora
+    for l in model_config.motion_lora_map:
+        lora_path = data_dir.joinpath(l)
+        logger.info(f"loading motion lora {lora_path=}")
+        if lora_path.is_file():
+            logger.info(f"Loading motion lora {lora_path}")
+            logger.info(f"alpha = {model_config.motion_lora_map[l]}")
+            load_motion_lora(unet, lora_path, alpha=model_config.motion_lora_map[l])
+        else:
+            raise ValueError(f"{lora_path=} not found")
+
+    logger.info("Creating AnimationPipeline...")
+    pipeline = AnimationPipeline(
+        vae=vae,
+        text_encoder=text_encoder,
+        text_encoder_2=text_encoder_two,
+        tokenizer=tokenizer,
+        tokenizer_2=tokenizer_two,
+        unet=unet,
+        scheduler=scheduler,
+        controlnet_map=None,
+    )
+
+    del vae
+    del text_encoder
+    del text_encoder_two
+    del tokenizer
+    del tokenizer_two
+    del unet
+
+    torch.cuda.empty_cache()
+
+    load_lora_map(pipeline, model_config.lora_map, video_length, is_sdxl=True)
+
+    # Load TI embeddings
+    load_text_embeddings(pipeline, is_sdxl=True)
+
+    return pipeline
+
+
 def create_pipeline(
     base_model: Union[str, PathLike] = default_base_path,
     model_config: ModelConfig = ...,
     infer_config: InferenceConfig = ...,
     use_xformers: bool = True,
     video_length: int = 16,
-) -> AnimationPipeline:
+    is_sdxl:bool = False,
+) -> DiffusionPipeline:
     """Create an AnimationPipeline from a pretrained model.
     Uses the base_model argument to load or download the pretrained reference pipeline model."""
 
@@ -360,6 +539,16 @@ def create_pipeline(
             if not (motion_module.exists() and motion_module.is_file()):
                 # this should never happen, but just in case...
                 raise FileNotFoundError(f"Motion module {motion_module} does not exist or is not a file!")
+
+    if is_sdxl:
+        return create_pipeline_sdxl(
+            base_model=base_model,
+            model_config=model_config,
+            infer_config=infer_config,
+            use_xformers=use_xformers,
+            video_length=video_length,
+            motion_module_path=motion_module,
+        )
 
     logger.info("Loading tokenizer...")
     tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(base_model, subfolder="tokenizer")
@@ -443,10 +632,13 @@ def create_pipeline(
     # motion lora
     for l in model_config.motion_lora_map:
         lora_path = data_dir.joinpath(l)
+        logger.info(f"loading motion lora {lora_path=}")
         if lora_path.is_file():
             logger.info(f"Loading motion lora {lora_path}")
             logger.info(f"alpha = {model_config.motion_lora_map[l]}")
             load_motion_lora(unet, lora_path, alpha=model_config.motion_lora_map[l])
+        else:
+            raise ValueError(f"{lora_path=} not found")
 
     logger.info("Creating AnimationPipeline...")
     pipeline = AnimationPipeline(
@@ -466,7 +658,7 @@ def create_pipeline(
 
     return pipeline
 
-def load_controlnet_models(pipe: AnimationPipeline, model_config: ModelConfig = ...,):
+def load_controlnet_models(pipe: DiffusionPipeline, model_config: ModelConfig = ..., is_sdxl:bool = False):
     # controlnet
     controlnet_map={}
     if model_config.controlnet_map:
@@ -476,11 +668,14 @@ def load_controlnet_models(pipe: AnimationPipeline, model_config: ModelConfig = 
             item = model_config.controlnet_map[c]
             if type(item) is dict:
                 if item["enable"] == True:
-                    img_dir = c_image_dir.joinpath( c )
-                    cond_imgs = sorted(glob.glob( os.path.join(img_dir, "[0-9]*.png"), recursive=False))
-                    if len(cond_imgs) > 0:
-                        logger.info(f"loading {c=} model")
-                        controlnet_map[c] = create_controlnet_model( c )
+                    if is_valid_controlnet_type(c, is_sdxl):
+                        img_dir = c_image_dir.joinpath( c )
+                        cond_imgs = sorted(glob.glob( os.path.join(img_dir, "[0-9]*.png"), recursive=False))
+                        if len(cond_imgs) > 0:
+                            logger.info(f"loading {c=} model")
+                            controlnet_map[c] = create_controlnet_model( c , is_sdxl)
+                    else:
+                        logger.info(f"invalid controlnet type for {'sdxl' if is_sdxl else 'sd15'} : {c}")
 
     if not controlnet_map:
         controlnet_map = None
@@ -489,10 +684,11 @@ def load_controlnet_models(pipe: AnimationPipeline, model_config: ModelConfig = 
 
 def unload_controlnet_models(pipe: AnimationPipeline):
     from animatediff.utils.util import show_gpu
-    show_gpu("before uload controlnet")
+
+    #show_gpu("before uload controlnet")
     pipe.controlnet_map = None
     torch.cuda.empty_cache()
-    show_gpu("after unload controlnet")
+    #show_gpu("after unload controlnet")
 
 
 def create_us_pipeline(
@@ -627,6 +823,7 @@ def controlnet_preprocess(
         duration: int = 16,
         out_dir: PathLike = ...,
         device_str:str=None,
+        is_sdxl:bool = False,
         ):
 
     if not controlnet_map:
@@ -656,29 +853,33 @@ def controlnet_preprocess(
         if type(item) is dict:
             if item["enable"] == True:
 
-                preprocessor_map = item["preprocessor"] if "preprocessor" in item else {}
+                if is_valid_controlnet_type(c, is_sdxl):
+                    preprocessor_map = item["preprocessor"] if "preprocessor" in item else {}
 
-                img_dir = c_image_dir.joinpath( c )
-                cond_imgs = sorted(glob.glob( os.path.join(img_dir, "[0-9]*.png"), recursive=False))
-                if len(cond_imgs) > 0:
+                    img_dir = c_image_dir.joinpath( c )
+                    cond_imgs = sorted(glob.glob( os.path.join(img_dir, "[0-9]*.png"), recursive=False))
+                    if len(cond_imgs) > 0:
 
-                    controlnet_type_map[c] = {
-                        "controlnet_conditioning_scale" : item["controlnet_conditioning_scale"],
-                        "control_guidance_start" : item["control_guidance_start"],
-                        "control_guidance_end" : item["control_guidance_end"],
-                        "control_scale_list" : item["control_scale_list"],
-                        "guess_mode" : item["guess_mode"] if "guess_mode" in item else False,
-                    }
+                        controlnet_type_map[c] = {
+                            "controlnet_conditioning_scale" : item["controlnet_conditioning_scale"],
+                            "control_guidance_start" : item["control_guidance_start"],
+                            "control_guidance_end" : item["control_guidance_end"],
+                            "control_scale_list" : item["control_scale_list"],
+                            "guess_mode" : item["guess_mode"] if "guess_mode" in item else False,
+                        }
 
-                    use_preprocessor = item["use_preprocessor"] if "use_preprocessor" in item else True
+                        use_preprocessor = item["use_preprocessor"] if "use_preprocessor" in item else True
 
-                    for img_path in tqdm(cond_imgs, desc=f"Preprocessing images ({c})"):
-                        frame_no = int(Path(img_path).stem)
-                        if frame_no < duration:
-                            if frame_no not in controlnet_image_map:
-                                controlnet_image_map[frame_no] = {}
-                            controlnet_image_map[frame_no][c] = get_preprocessed_img( c, get_resized_image2(img_path, 512) , use_preprocessor, device_str, preprocessor_map)
-                            processed = True
+                        for img_path in tqdm(cond_imgs, desc=f"Preprocessing images ({c})"):
+                            frame_no = int(Path(img_path).stem)
+                            if frame_no < duration:
+                                if frame_no not in controlnet_image_map:
+                                    controlnet_image_map[frame_no] = {}
+                                controlnet_image_map[frame_no][c] = get_preprocessed_img( c, get_resized_image2(img_path, 512) , use_preprocessor, device_str, preprocessor_map)
+                                processed = True
+                else:
+                    logger.info(f"invalid controlnet type for {'sdxl' if is_sdxl else 'sd15'} : {c}")
+
 
         if save_detectmap and processed:
             det_dir = out_dir.joinpath(f"{0:02d}_detectmap/{c}")
@@ -728,6 +929,7 @@ def ip_adapter_preprocess(
         height: int = 512,
         duration: int = 16,
         out_dir: PathLike = ...,
+        is_sdxl: bool = False,
         ):
 
     ip_adapter_map={}
@@ -740,7 +942,7 @@ def ip_adapter_preprocess(
             image_dir = data_dir.joinpath( ip_adapter_config_map["input_image_dir"] )
             imgs = sorted(chain.from_iterable([glob.glob(os.path.join(image_dir, f"[0-9]*{ext}")) for ext in IMG_EXTENSIONS]))
             if len(imgs) > 0:
-                prepare_ip_adapter()
+                prepare_ip_adapter_sdxl() if is_sdxl else prepare_ip_adapter()
                 ip_adapter_map["images"] = {}
                 for img_path in tqdm(imgs, desc=f"Preprocessing images (ip_adapter)"):
                     frame_no = int(Path(img_path).stem)
@@ -812,6 +1014,7 @@ def region_preprocess(
         duration: int = 16,
         out_dir: PathLike = ...,
         is_init_img_exist: bool = False,
+        is_sdxl:bool = False,
         ):
 
     is_bg_init_img = False
@@ -833,7 +1036,8 @@ def region_preprocess(
                 width,
                 height,
                 duration,
-                out_dir
+                out_dir,
+                is_sdxl
             )
 
         if ip_map:
@@ -891,7 +1095,8 @@ def region_preprocess(
                         width,
                         height,
                         duration,
-                        region_dir
+                        region_dir,
+                        is_sdxl
                     )
 
                 if ip_map:
@@ -914,6 +1119,7 @@ def region_preprocess(
                 condi_index += 1
             else:
                 if is_init_img_exist == False:
+                    logger.warn("'is_init_img' : true / BUT init_img is not exist -> ignore region")
                     continue
                 src = -1
 
@@ -937,7 +1143,6 @@ def region_preprocess(
             if c["ip_adapter_map"] == None:
                 logger.info(f"fill map")
                 c["ip_adapter_map"] = prev_ip_map
-
 
 
 
@@ -1124,7 +1329,7 @@ def save_output(
 
 
 def run_inference(
-    pipeline: AnimationPipeline,
+    pipeline: DiffusionPipeline,
     n_prompt: str = ...,
     seed: int = -1,
     steps: int = 25,
@@ -1151,6 +1356,7 @@ def run_inference(
     region_condi_list: List[Any] = None,
     output_map: Dict[str,Any] = None,
     is_single_prompt_mode: bool = False,
+    is_sdxl:bool=False,
 ):
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 

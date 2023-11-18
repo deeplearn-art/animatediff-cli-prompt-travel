@@ -1093,8 +1093,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         image = image.to(device=device, dtype=dtype)
 
-        if do_classifier_free_guidance and not guess_mode:
-            image = torch.cat([image] * 2)
+        #if do_classifier_free_guidance and not guess_mode:
+        #    image = torch.cat([image] * 2)
 
         return image
 
@@ -2374,7 +2374,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         controlnet_image_map_org = controlnet_image_map
 
-        controlnet_max_models_on_vram = max(controlnet_max_models_on_vram,1)
+        controlnet_max_models_on_vram = max(controlnet_max_models_on_vram,0)
 
         # Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
@@ -2484,10 +2484,14 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         controlnet_scale_map = {}
         controlnet_affected_list = np.zeros(video_length,dtype = int)
 
+        is_v2v = True
+
         if controlnet_image_map:
             for type_str in controlnet_image_map:
                 for key_frame_no in controlnet_image_map[type_str]:
                     scale_list = controlnet_type_map[type_str]["control_scale_list"]
+                    if len(scale_list) > 0:
+                        is_v2v = False
                     scale_list = scale_list[0: context_frames]
                     scale_len = len(scale_list)
 
@@ -2877,9 +2881,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     stopwatch_record("lora_map UNapply end")
 
                     if controlnet_image_map:
-                        controlnet_target = list(range(context[0]-context_frames, context[0])) + context + list(range(context[-1]+1, context[-1]+1+context_frames))
-                        controlnet_target = [f%video_length for f in controlnet_target]
-                        controlnet_target = list(set(controlnet_target))
+                        if is_v2v:
+                            controlnet_target = context
+                        else:
+                            controlnet_target = list(range(context[0]-context_frames, context[0])) + context + list(range(context[-1]+1, context[-1]+1+context_frames))
+                            controlnet_target = [f%video_length for f in controlnet_target]
+                            controlnet_target = list(set(controlnet_target))
 
                         process_controlnet(controlnet_target)
 

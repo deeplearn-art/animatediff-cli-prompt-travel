@@ -86,8 +86,13 @@ class InferenceConfig(BaseSettings):
 
 def get_infer_config(
     is_v2:bool,
+    is_sdxl:bool,
 ) -> InferenceConfig:
     config_path: Path = get_dir("config").joinpath("inference/default.json" if not is_v2 else "inference/motion_v2.json")
+
+    if is_sdxl:
+        config_path = get_dir("config").joinpath("inference/motion_sdxl.json")
+
     settings = InferenceConfig(json_config_path=config_path)
     return settings
 

@@ -264,7 +264,7 @@ def create_config(
 
     if low_vram:
         model_config.controlnet_map["max_samples_on_vram"] = 0
-        model_config.controlnet_map["max_models_on_vram"] = 1
+        model_config.controlnet_map["max_models_on_vram"] = 0
 
 
     if not is_img2img:

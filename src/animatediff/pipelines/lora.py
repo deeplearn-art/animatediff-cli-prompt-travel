@@ -21,16 +21,17 @@ def merge_safetensors_lora(text_encoder, unet, lora_path, alpha=0.75, is_animate
     lora_network.load_state_dict(sd, False)
     lora_network.merge_to(alpha)
 
-def load_lora_map(pipe, lora_map_config, video_length):
+def load_lora_map(pipe, lora_map_config, video_length, is_sdxl=False):
     new_map = {}
     for item in lora_map_config:
         lora_path = data_dir.joinpath(item)
         if type(lora_map_config[item]) in (float,int):
-            merge_safetensors_lora(pipe.text_encoder, pipe.unet, lora_path, lora_map_config[item], True)
+#            merge_safetensors_lora(pipe.text_encoder, pipe.unet, lora_path, lora_map_config[item], True)
+            merge_safetensors_lora(pipe.text_encoder, pipe.unet, lora_path, lora_map_config[item], not is_sdxl)
         else:
             new_map[lora_path] = lora_map_config[item]
 
-    lora_map = LoraMap(pipe, new_map, video_length)
+    lora_map = LoraMap(pipe, new_map, video_length, is_sdxl)
     pipe.lora_map = lora_map if lora_map.is_valid else None
 
 
@@ -43,6 +44,7 @@ class LoraMap:
             pipe,
             lora_map,
             video_length,
+            is_sdxl,
         ):
         self.networks = []
 
@@ -75,7 +77,7 @@ class LoraMap:
             sd = load_file(lora_path)
             if not sd:
                 continue
-            lora_network: LoRANetwork = create_network_from_weights(pipe.text_encoder, pipe.unet, sd, multiplier=0.75, is_animatediff=True)
+            lora_network: LoRANetwork = create_network_from_weights(pipe.text_encoder, pipe.unet, sd, multiplier=0.75, is_animatediff=not is_sdxl)
             lora_network.load_state_dict(sd, False)
             lora_network.apply_to(0.75)
 
