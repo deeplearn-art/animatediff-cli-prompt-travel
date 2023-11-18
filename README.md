@@ -162,10 +162,9 @@ py -3.10 -m venv venv
 venv\Scripts\activate.bat
 set PYTHONUTF8=1
 python -m pip install --upgrade pip
-# Torch installation must be modified to suit the environment. (https://pytorch.org/get-started/previous-versions/)
-python -m pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+# Torch installation must be modified to suit the environment. (https://pytorch.org/get-started/locally/)
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python -m pip install -e .
-python -m pip install xformers
 
 # If you want to use the 'stylize' command, you will also need
 python -m pip install -e .[stylize]
