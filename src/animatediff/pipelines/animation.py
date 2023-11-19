@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+from diffusers import LCMScheduler
 from diffusers.configuration_utils import FrozenDict
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.loaders import LoraLoaderMixin, TextualInversionLoaderMixin
@@ -2368,9 +2369,15 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         region_condi_list: List[Any] = None,
         interpolation_factor = 1,
         is_single_prompt_mode = False,
+        apply_lcm_lora= False,
         **kwargs,
     ):
         global C_REF_MODE
+
+
+        logger.info(f"{apply_lcm_lora=}")
+        if apply_lcm_lora:
+            self.scheduler = LCMScheduler.from_config(self.scheduler.config)
 
         controlnet_image_map_org = controlnet_image_map
 

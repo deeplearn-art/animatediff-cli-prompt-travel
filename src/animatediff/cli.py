@@ -99,10 +99,10 @@ diffuser_ver = meta_version('diffusers')
 
 logger.info(f"{diffuser_ver=}")
 
-if version.parse(diffuser_ver) < version.parse('0.21.2'):
+if version.parse(diffuser_ver) < version.parse('0.23.0'):
     logger.error(f"The version of diffusers is out of date")
-    logger.error(f"python -m pip install diffusers==0.21.2")
-    raise ImportError("Please update diffusers to 0.21.2")
+    logger.error(f"python -m pip install diffusers==0.23.0")
+    raise ImportError("Please update diffusers to 0.23.0")
 
 try:
     from animatediff.rife import app as rife_app
@@ -453,6 +453,7 @@ def generate(
                 output_map = model_config.output,
                 is_single_prompt_mode=model_config.is_single_prompt_mode,
                 is_sdxl=is_sdxl,
+                apply_lcm_lora=model_config.apply_lcm_lora
             )
             outputs.append(output)
             torch.cuda.empty_cache()

@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+from diffusers import LCMScheduler
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.loaders import (FromSingleFileMixin, LoraLoaderMixin,
                                TextualInversionLoaderMixin)
@@ -1139,6 +1140,7 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
         region_condi_list: List[Any] = None,
         interpolation_factor = 1,
         is_single_prompt_mode = False,
+        apply_lcm_lora=False,
         **kwargs,
     ):
         r"""
@@ -1248,6 +1250,9 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
             `tuple`. When returning a tuple, the first element is a list with the generated images.
         """
 
+        logger.info(f"{apply_lcm_lora=}")
+        if apply_lcm_lora:
+            self.scheduler = LCMScheduler.from_config(self.scheduler.config)
 
         controlnet_image_map_org = controlnet_image_map
 

@@ -277,6 +277,45 @@ def prepare_ip_adapter_sdxl():
             repo_id="h94/IP-Adapter", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/ip_adapter"
         )
 
+
+def prepare_lcm_lora():
+    import os
+    from pathlib import PurePosixPath
+
+    from huggingface_hub import hf_hub_download
+
+    os.makedirs("data/models/lcm_lora/sdxl", exist_ok=True)
+    for hub_file in [
+        "pytorch_lora_weights.safetensors",
+    ]:
+        path = Path(hub_file)
+
+        saved_path = "data/models/lcm_lora/sdxl" / path
+
+        if os.path.exists(saved_path):
+            continue
+
+        hf_hub_download(
+            repo_id="latent-consistency/lcm-lora-sdxl", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/lcm_lora/sdxl"
+        )
+
+    os.makedirs("data/models/lcm_lora/sd15", exist_ok=True)
+    for hub_file in [
+        "pytorch_lora_weights.safetensors",
+    ]:
+        path = Path(hub_file)
+
+        saved_path = "data/models/lcm_lora/sd15" / path
+
+        if os.path.exists(saved_path):
+            continue
+
+        hf_hub_download(
+            repo_id="latent-consistency/lcm-lora-sdv1-5", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/lcm_lora/sd15"
+        )
+
+
+
 def prepare_motion_module():
     import os
     from pathlib import PurePosixPath

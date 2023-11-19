@@ -32,7 +32,7 @@ from animatediff.dwpose import DWposeDetector
 from animatediff.models.clip import CLIPSkipTextModel
 from animatediff.models.unet import UNet3DConditionModel
 from animatediff.pipelines import AnimationPipeline, load_text_embeddings
-from animatediff.pipelines.lora import load_lora_map
+from animatediff.pipelines.lora import load_lcm_lora, load_lora_map
 from animatediff.pipelines.pipeline_controlnet_img2img_reference import \
     StableDiffusionControlNetImg2ImgReferencePipeline
 from animatediff.schedulers import get_scheduler
@@ -46,7 +46,7 @@ from animatediff.utils.util import (get_resized_image, get_resized_image2,
                                     get_resized_images,
                                     get_tensor_interpolation_method,
                                     prepare_dwpose, prepare_ip_adapter,
-                                    prepare_ip_adapter_sdxl,
+                                    prepare_ip_adapter_sdxl, prepare_lcm_lora,
                                     prepare_motion_module, save_frames,
                                     save_imgs, save_video)
 
@@ -506,6 +506,10 @@ def create_pipeline_sdxl(
 
     torch.cuda.empty_cache()
 
+    if model_config.apply_lcm_lora:
+        prepare_lcm_lora()
+        load_lcm_lora(pipeline, model_config.lcm_lora_scale, is_sdxl=True)
+
     load_lora_map(pipeline, model_config.lora_map, video_length, is_sdxl=True)
 
     # Load TI embeddings
@@ -650,6 +654,10 @@ def create_pipeline(
         feature_extractor=feature_extractor,
         controlnet_map=None,
     )
+
+    if model_config.apply_lcm_lora:
+        prepare_lcm_lora()
+        load_lcm_lora(pipeline, model_config.lcm_lora_scale, is_sdxl=False)
 
     load_lora_map(pipeline, model_config.lora_map, video_length)
 
@@ -1358,6 +1366,7 @@ def run_inference(
     output_map: Dict[str,Any] = None,
     is_single_prompt_mode: bool = False,
     is_sdxl:bool=False,
+    apply_lcm_lora:bool=False,
 ):
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 
@@ -1412,6 +1421,7 @@ def run_inference(
         region_condi_list=region_condi_list,
         interpolation_factor=1,
         is_single_prompt_mode=is_single_prompt_mode,
+        apply_lcm_lora=apply_lcm_lora,
         callback=callback,
         callback_steps=output_map.get("preview_steps"),
     )

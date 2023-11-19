@@ -1,6 +1,8 @@
 {
   "name": "sample",
   "path": "share/Stable-diffusion/mistoonAnime_v20.safetensors",
+  "apply_lcm_lora": false,
+  "lcm_lora_scale": 1.0,
   "motion_module": "models/motion-module/mm_sd_v15_v2.ckpt",
   "compile": false,
   "seed": [
