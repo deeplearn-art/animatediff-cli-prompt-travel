@@ -662,9 +662,9 @@ ex.  \_\_animal\_\_ for animal.txt. \_\_background-color\_\_ for background-colo
 - lora and ip adapter
 
 ### Recommended settings for 8-12 GB of vram
-- max_samples_on_vram : 0 (The generation speed for this setting has been improved in the latest version.)
-- max_models_on_vram : 1 (The generation speed for this setting has been improved in the latest version.)
-- Generate at lower resolution and upscale to higher resolution
+- max_samples_on_vram : 0
+- max_models_on_vram : 0
+- Generate at lower resolution and upscale to higher resolution with lower the value of context.
 - In the latest version, the amount of vram used during generation has been reduced.
 ```sh
 animatediff generate -c config/prompts/your_config.json -W 384 -H 576 -L 48 -C 16
