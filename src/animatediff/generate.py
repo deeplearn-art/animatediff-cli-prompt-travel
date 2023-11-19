@@ -1139,6 +1139,7 @@ def region_preprocess(
         ip_adapter_config_map["is_plus"] = model_config.ip_adapter_map["is_plus"]
         ip_adapter_config_map["is_plus_face"] = model_config.ip_adapter_map["is_plus_face"] if "is_plus_face" in model_config.ip_adapter_map else False
         ip_adapter_config_map["is_light"] = model_config.ip_adapter_map["is_light"] if "is_light" in model_config.ip_adapter_map else False
+        ip_adapter_config_map["is_full_face"] = model_config.ip_adapter_map["is_full_face"] if "is_full_face" in model_config.ip_adapter_map else False
         for c in region_condi_list:
             if c["ip_adapter_map"] == None:
                 logger.info(f"fill map")

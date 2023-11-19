@@ -314,6 +314,7 @@ def create_config(
         "save_input_image": True,
         "resized_to_square": False,
         "scale": 0.5,
+        "is_full_face": False,
         "is_plus_face": False,
         "is_plus": True,
         "is_light": False

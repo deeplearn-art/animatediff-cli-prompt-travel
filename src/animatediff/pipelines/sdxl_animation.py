@@ -37,7 +37,7 @@ from einops import rearrange
 from transformers import (CLIPTextModel, CLIPTextModelWithProjection,
                           CLIPTokenizer)
 
-from animatediff.ip_adapter import IPAdapterXL
+from animatediff.ip_adapter import IPAdapterPlusXL, IPAdapterXL
 from animatediff.pipelines.animation import PromptEncoder, RegionMask
 from animatediff.pipelines.context import (get_context_scheduler,
                                            get_total_steps)
@@ -1251,7 +1251,6 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
 
         controlnet_image_map_org = controlnet_image_map
 
-        #controlnet_max_models_on_vram = max(controlnet_max_models_on_vram,1)
         controlnet_max_models_on_vram = 0
         controlnet_max_samples_on_vram = 0
 
@@ -1297,8 +1296,13 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
         latents_device = torch.device("cpu") if sequential_mode else device
 
         if ip_adapter_config_map:
-            img_enc_path = "data/models/ip_adapter/sdxl_models/image_encoder/"
-            self.ip_adapter = IPAdapterXL(self, img_enc_path, "data/models/ip_adapter/sdxl_models/ip-adapter_sdxl.bin", device, 4)
+            img_enc_path = "data/models/ip_adapter/models/image_encoder/"
+            if ip_adapter_config_map["is_plus"]:
+                self.ip_adapter = IPAdapterPlusXL(self, img_enc_path, "data/models/ip_adapter/sdxl_models/ip-adapter-plus_sdxl_vit-h.bin", device, 16)
+            elif ip_adapter_config_map["is_plus_face"]:
+                self.ip_adapter = IPAdapterPlusXL(self, img_enc_path, "data/models/ip_adapter/sdxl_models/ip-adapter-plus-face_sdxl_vit-h.bin", device, 16)
+            else:
+                self.ip_adapter = IPAdapterXL(self, img_enc_path, "data/models/ip_adapter/sdxl_models/ip-adapter_sdxl_vit-h.bin", device, 4)
             self.ip_adapter.set_scale( ip_adapter_config_map["scale"] )
         else:
             self.ip_adapter = None
@@ -1327,17 +1331,18 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
             multi_uncond_mode=multi_uncond_mode
         )
 
+        if self.ip_adapter:
+            self.ip_adapter.delete_encoder()
+
+
         condi_size = prompt_encoder.get_condi_size()
 
 
         # 3.5 Prepare controlnet variables
 
         if self.controlnet_map:
-            if controlnet_max_models_on_vram < len(self.controlnet_map):
-                for _, type_str in zip( range(controlnet_max_models_on_vram-1) ,self.controlnet_map):
-                    self.controlnet_map[type_str].to(device=device, non_blocking=True)
-            else:
-                for type_str in self.controlnet_map:
+            for i, type_str in enumerate(self.controlnet_map):
+                if i < controlnet_max_models_on_vram:
                     self.controlnet_map[type_str].to(device=device, non_blocking=True)
 
 

@@ -238,7 +238,8 @@ def prepare_ip_adapter():
         "models/ip-adapter-plus_sd15.bin",
         "models/ip-adapter_sd15.bin",
         "models/ip-adapter_sd15_light.bin",
-        "models/ip-adapter-plus-face_sd15.bin"
+        "models/ip-adapter-plus-face_sd15.bin",
+        "models/ip-adapter-full-face_sd15.bin",
     ]:
         path = Path(hub_file)
 
@@ -259,9 +260,11 @@ def prepare_ip_adapter_sdxl():
 
     os.makedirs("data/models/ip_adapter/sdxl_models/image_encoder", exist_ok=True)
     for hub_file in [
-        "sdxl_models/image_encoder/config.json",
-        "sdxl_models/image_encoder/pytorch_model.bin",
-        "sdxl_models/ip-adapter_sdxl.bin"
+        "models/image_encoder/config.json",
+        "models/image_encoder/pytorch_model.bin",
+        "sdxl_models/ip-adapter-plus_sdxl_vit-h.bin",
+        "sdxl_models/ip-adapter-plus-face_sdxl_vit-h.bin",
+        "sdxl_models/ip-adapter_sdxl_vit-h.bin",
     ]:
         path = Path(hub_file)
 

@@ -25,7 +25,7 @@ from packaging import version
 from tqdm.rich import tqdm
 from transformers import CLIPImageProcessor, CLIPTokenizer
 
-from animatediff.ip_adapter import IPAdapter, IPAdapterPlus
+from animatediff.ip_adapter import IPAdapter, IPAdapterFull, IPAdapterPlus
 from animatediff.models.attention import BasicTransformerBlock
 from animatediff.models.clip import CLIPSkipTextModel
 from animatediff.models.unet import (UNet3DConditionModel,
@@ -2400,7 +2400,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         if ip_adapter_config_map:
             if self.ip_adapter is None:
                 img_enc_path = "data/models/ip_adapter/models/image_encoder/"
-                if ip_adapter_config_map["is_light"]:
+                if ip_adapter_config_map["is_full_face"]:
+                    self.ip_adapter = IPAdapterFull(self, img_enc_path, "data/models/ip_adapter/models/ip-adapter-full-face_sd15.bin", device, 257)
+                elif ip_adapter_config_map["is_light"]:
                     self.ip_adapter = IPAdapter(self, img_enc_path, "data/models/ip_adapter/models/ip-adapter_sd15_light.bin", device, 4)
                 elif ip_adapter_config_map["is_plus_face"]:
                     self.ip_adapter = IPAdapterPlus(self, img_enc_path, "data/models/ip_adapter/models/ip-adapter-plus-face_sd15.bin", device, 16)
@@ -2434,6 +2436,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             multi_uncond_mode
         )
 
+        if self.ip_adapter:
+            self.ip_adapter.delete_encoder()
 
         if controlnet_ref_map is not None:
             if unet_batch_size < prompt_encoder.get_condi_size():
@@ -2446,12 +2450,10 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         # 3.5 Prepare controlnet variables
 
         if self.controlnet_map:
-            if controlnet_max_models_on_vram < len(self.controlnet_map):
-                for _, type_str in zip( range(controlnet_max_models_on_vram-1) ,self.controlnet_map):
+            for i, type_str in enumerate(self.controlnet_map):
+                if i < controlnet_max_models_on_vram:
                     self.controlnet_map[type_str].to(device=device, non_blocking=True)
-            else:
-                for type_str in self.controlnet_map:
-                    self.controlnet_map[type_str].to(device=device, non_blocking=True)
+
 
 
         # controlnet_image_map
