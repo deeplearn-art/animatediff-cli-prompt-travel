@@ -153,8 +153,7 @@ It seems to work surprisingly well!
 ### Installation(for windows)
 Same as the original animatediff-cli  
 [Python 3.10](https://www.python.org/) and git client must be installed  
-(A few days ago, PyTorch 2.1 was released, but it is safer to install the older version until things settle down.   
-[#87](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/87))
+
 ```sh
 git clone https://github.com/s9roll7/animatediff-cli-prompt-travel.git
 cd animatediff-cli-prompt-travel
@@ -189,6 +188,8 @@ Almost same as the original animatediff-cli, but with a slight change in config 
 {
   "name": "sample",
   "path": "share/Stable-diffusion/mistoonAnime_v20.safetensors",  # Specify Checkpoint as a path relative to /animatediff-cli/data
+  "apply_lcm_lora": false,             # lcm-lora
+  "lcm_lora_scale": 1.0,               # lcm-lora
   "vae_path":"share/VAE/vae-ft-mse-840000-ema-pruned.ckpt",       # Specify vae as a path relative to /animatediff-cli/data
   "motion_module": "models/motion-module/mm_sd_v14.ckpt",         # Specify motion module as a path relative to /animatediff-cli/data
   "compile": false,
@@ -229,9 +230,11 @@ Almost same as the original animatediff-cli, but with a slight change in config 
       "save_input_image": true,
       # Ratio of image prompt vs text prompt (important). Even if you want to emphasize only the image prompt in 1.0, do not leave prompt/neg prompt empty, but specify a general text such as "best quality".
       "scale": 0.5,
-      # IP-Adapter or IP-Adapter Plus or IP-Adapter Plus Face (important) It would be a completely different outcome. Not always PLUS a superior result.
-      "is_plus_face": true,
-      "is_plus": true
+      # IP-Adapter/IP-Adapter Full Face/IP-Adapter Plus Face/IP-Adapter Plus/IP-Adapter Light (important) It would be a completely different outcome. Not always PLUS a superior result.
+      "is_full_face": false,
+      "is_plus_face": false,
+      "is_plus": true,
+      "is_light": false
   },
   "img2img_map": {
       # enable/disable
