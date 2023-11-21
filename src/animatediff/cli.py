@@ -353,6 +353,7 @@ def generate(
     # beware the pipeline
     global g_pipeline
     global last_model_path
+    pipeline_already_loaded = False
     if g_pipeline is None or last_model_path != model_config.path.resolve():
         g_pipeline = create_pipeline(
             base_model=base_model_path,
@@ -368,10 +369,12 @@ def generate(
         # reload TIs; create_pipeline does this for us, but they may have changed
         # since load time if we're being called from another package
         load_text_embeddings(g_pipeline, is_sdxl=is_sdxl)
+        pipeline_already_loaded = True
 
     load_controlnet_models(pipe=g_pipeline, model_config=model_config, is_sdxl=is_sdxl)
 
-    if g_pipeline.device == device:
+#    if g_pipeline.device == device:
+    if pipeline_already_loaded:
         logger.info("Pipeline already on the correct device, skipping device transfer")
     else:
 

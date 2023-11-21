@@ -37,6 +37,8 @@ from animatediff.pipelines.pipeline_controlnet_img2img_reference import \
     StableDiffusionControlNetImg2ImgReferencePipeline
 from animatediff.schedulers import get_scheduler
 from animatediff.settings import InferenceConfig, ModelConfig
+from animatediff.utils.control_net_lllite import (ControlNetLLLite,
+                                                  load_controlnet_lllite)
 from animatediff.utils.convert_from_ckpt import convert_ldm_vae_checkpoint
 from animatediff.utils.convert_lora_safetensor_to_diffusers import convert_lora
 from animatediff.utils.model import (ensure_motion_modules,
@@ -47,8 +49,65 @@ from animatediff.utils.util import (get_resized_image, get_resized_image2,
                                     get_tensor_interpolation_method,
                                     prepare_dwpose, prepare_ip_adapter,
                                     prepare_ip_adapter_sdxl, prepare_lcm_lora,
-                                    prepare_motion_module, save_frames,
-                                    save_imgs, save_video)
+                                    prepare_lllite, prepare_motion_module,
+                                    save_frames, save_imgs, save_video)
+
+controlnet_address_table={
+    "controlnet_tile" : ['lllyasviel/control_v11f1e_sd15_tile'],
+    "controlnet_lineart_anime" : ['lllyasviel/control_v11p_sd15s2_lineart_anime'],
+    "controlnet_ip2p" : ['lllyasviel/control_v11e_sd15_ip2p'],
+    "controlnet_openpose" : ['lllyasviel/control_v11p_sd15_openpose'],
+    "controlnet_softedge" : ['lllyasviel/control_v11p_sd15_softedge'],
+    "controlnet_shuffle" : ['lllyasviel/control_v11e_sd15_shuffle'],
+    "controlnet_depth" : ['lllyasviel/control_v11f1p_sd15_depth'],
+    "controlnet_canny" : ['lllyasviel/control_v11p_sd15_canny'],
+    "controlnet_inpaint" : ['lllyasviel/control_v11p_sd15_inpaint'],
+    "controlnet_lineart" : ['lllyasviel/control_v11p_sd15_lineart'],
+    "controlnet_mlsd" : ['lllyasviel/control_v11p_sd15_mlsd'],
+    "controlnet_normalbae" : ['lllyasviel/control_v11p_sd15_normalbae'],
+    "controlnet_scribble" : ['lllyasviel/control_v11p_sd15_scribble'],
+    "controlnet_seg" : ['lllyasviel/control_v11p_sd15_seg'],
+    "qr_code_monster_v1" : ['monster-labs/control_v1p_sd15_qrcode_monster'],
+    "qr_code_monster_v2" : ['monster-labs/control_v1p_sd15_qrcode_monster', 'v2'],
+    "controlnet_mediapipe_face" : ['CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"],
+}
+
+# Edit this table if you want to change to another controlnet checkpoint
+controlnet_address_table_sdxl={
+#    "controlnet_openpose" : ['thibaud/controlnet-openpose-sdxl-1.0'],
+#    "controlnet_softedge" : ['SargeZT/controlnet-sd-xl-1.0-softedge-dexined'],
+#    "controlnet_depth" : ['diffusers/controlnet-depth-sdxl-1.0-small'],
+#    "controlnet_canny" : ['diffusers/controlnet-canny-sdxl-1.0-small'],
+#    "controlnet_seg" : ['SargeZT/sdxl-controlnet-seg'],
+    "qr_code_monster_v1" : ['monster-labs/control_v1p_sdxl_qrcode_monster'],
+}
+
+# Edit this table if you want to change to another lllite checkpoint
+lllite_address_table_sdxl={
+    "controlnet_tile" : ['models/lllite/bdsqlsz_controlllite_xl_tile_anime_β.safetensors'],
+    "controlnet_lineart_anime" : ['models/lllite/bdsqlsz_controlllite_xl_lineart_anime_denoise.safetensors'],
+#    "controlnet_ip2p" : ('lllyasviel/control_v11e_sd15_ip2p'),
+    "controlnet_openpose" : ['models/lllite/bdsqlsz_controlllite_xl_dw_openpose.safetensors'],
+#    "controlnet_openpose" : ['models/lllite/controllllite_v01032064e_sdxl_pose_anime.safetensors'],
+    "controlnet_softedge" : ['models/lllite/bdsqlsz_controlllite_xl_softedge.safetensors'],
+    "controlnet_shuffle" : ['models/lllite/bdsqlsz_controlllite_xl_t2i-adapter_color_shuffle.safetensors'],
+    "controlnet_depth" : ['models/lllite/bdsqlsz_controlllite_xl_depth.safetensors'],
+    "controlnet_canny" : ['models/lllite/bdsqlsz_controlllite_xl_canny.safetensors'],
+#    "controlnet_canny" : ['models/lllite/controllllite_v01032064e_sdxl_canny.safetensors'],
+#    "controlnet_inpaint" : ('lllyasviel/control_v11p_sd15_inpaint'),
+#    "controlnet_lineart" : ('lllyasviel/control_v11p_sd15_lineart'),
+    "controlnet_mlsd" : ['models/lllite/bdsqlsz_controlllite_xl_mlsd_V2.safetensors'],
+    "controlnet_normalbae" : ['models/lllite/bdsqlsz_controlllite_xl_normal.safetensors'],
+    "controlnet_scribble" : ['models/lllite/bdsqlsz_controlllite_xl_sketch.safetensors'],
+    "controlnet_seg" : ['models/lllite/bdsqlsz_controlllite_xl_segment_animeface_V2.safetensors'],
+#    "qr_code_monster_v1" : ['monster-labs/control_v1p_sdxl_qrcode_monster'],
+#    "qr_code_monster_v2" : ('monster-labs/control_v1p_sd15_qrcode_monster', 'v2'),
+#    "controlnet_mediapipe_face" : ('CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"),
+}
+
+
+
+
 
 try:
     import onnxruntime
@@ -218,57 +277,17 @@ class TileResamplePreProcessor:
         return Image.fromarray(dst)
 
 
-controlnet_address_table={
-    "controlnet_tile" : ['lllyasviel/control_v11f1e_sd15_tile'],
-    "controlnet_lineart_anime" : ['lllyasviel/control_v11p_sd15s2_lineart_anime'],
-    "controlnet_ip2p" : ['lllyasviel/control_v11e_sd15_ip2p'],
-    "controlnet_openpose" : ['lllyasviel/control_v11p_sd15_openpose'],
-    "controlnet_softedge" : ['lllyasviel/control_v11p_sd15_softedge'],
-    "controlnet_shuffle" : ['lllyasviel/control_v11e_sd15_shuffle'],
-    "controlnet_depth" : ['lllyasviel/control_v11f1p_sd15_depth'],
-    "controlnet_canny" : ['lllyasviel/control_v11p_sd15_canny'],
-    "controlnet_inpaint" : ['lllyasviel/control_v11p_sd15_inpaint'],
-    "controlnet_lineart" : ['lllyasviel/control_v11p_sd15_lineart'],
-    "controlnet_mlsd" : ['lllyasviel/control_v11p_sd15_mlsd'],
-    "controlnet_normalbae" : ['lllyasviel/control_v11p_sd15_normalbae'],
-    "controlnet_scribble" : ['lllyasviel/control_v11p_sd15_scribble'],
-    "controlnet_seg" : ['lllyasviel/control_v11p_sd15_seg'],
-    "qr_code_monster_v1" : ['monster-labs/control_v1p_sd15_qrcode_monster'],
-    "qr_code_monster_v2" : ['monster-labs/control_v1p_sd15_qrcode_monster', 'v2'],
-    "controlnet_mediapipe_face" : ['CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"],
-}
-
-controlnet_address_table_sdxl={
-#    "controlnet_tile" : ('lllyasviel/control_v11f1e_sd15_tile'),
-#    "controlnet_lineart_anime" : ('lllyasviel/control_v11p_sd15s2_lineart_anime'),
-#    "controlnet_ip2p" : ('lllyasviel/control_v11e_sd15_ip2p'),
-    "controlnet_openpose" : ['thibaud/controlnet-openpose-sdxl-1.0'],
-    "controlnet_softedge" : ['SargeZT/controlnet-sd-xl-1.0-softedge-dexined'],
-#    "controlnet_shuffle" : ('lllyasviel/control_v11e_sd15_shuffle'),
-    "controlnet_depth" : ['diffusers/controlnet-depth-sdxl-1.0-small'],
-    "controlnet_canny" : ['diffusers/controlnet-canny-sdxl-1.0-small'],
-#    "controlnet_inpaint" : ('lllyasviel/control_v11p_sd15_inpaint'),
-#    "controlnet_lineart" : ('lllyasviel/control_v11p_sd15_lineart'),
-#    "controlnet_mlsd" : ('lllyasviel/control_v11p_sd15_mlsd'),
-#    "controlnet_normalbae" : ('lllyasviel/control_v11p_sd15_normalbae'),
-#    "controlnet_scribble" : ('lllyasviel/control_v11p_sd15_scribble'),
-    "controlnet_seg" : ['SargeZT/sdxl-controlnet-seg'],
-    "qr_code_monster_v1" : ['monster-labs/control_v1p_sdxl_qrcode_monster'],
-#    "qr_code_monster_v2" : ('monster-labs/control_v1p_sd15_qrcode_monster', 'v2'),
-#    "controlnet_mediapipe_face" : ('CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"),
-}
-
 
 def is_valid_controlnet_type(type_str, is_sdxl):
     if not is_sdxl:
         return type_str in controlnet_address_table
     else:
-        return type_str in controlnet_address_table_sdxl
+        return (type_str in controlnet_address_table_sdxl) or (type_str in lllite_address_table_sdxl)
 
 
 
 
-def create_controlnet_model(type_str, is_sdxl):
+def create_controlnet_model(pipe, type_str, is_sdxl):
     if not is_sdxl:
         if type_str in controlnet_address_table:
             addr = controlnet_address_table[type_str]
@@ -286,6 +305,10 @@ def create_controlnet_model(type_str, is_sdxl):
                 return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16)
             else:
                 return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16)
+        elif type_str in lllite_address_table_sdxl:
+            addr = lllite_address_table_sdxl[type_str]
+            model_path = data_dir.joinpath(addr[0])
+            return load_controlnet_lllite(model_path, pipe, torch_dtype=torch.float16)
         else:
             raise ValueError(f"unknown controlnet type {type_str}")
 
@@ -668,6 +691,10 @@ def create_pipeline(
 
 def load_controlnet_models(pipe: DiffusionPipeline, model_config: ModelConfig = ..., is_sdxl:bool = False):
     # controlnet
+
+    if is_sdxl:
+        prepare_lllite()
+
     controlnet_map={}
     if model_config.controlnet_map:
         c_image_dir = data_dir.joinpath( model_config.controlnet_map["input_image_dir"] )
@@ -681,7 +708,7 @@ def load_controlnet_models(pipe: DiffusionPipeline, model_config: ModelConfig = 
                         cond_imgs = sorted(glob.glob( os.path.join(img_dir, "[0-9]*.png"), recursive=False))
                         if len(cond_imgs) > 0:
                             logger.info(f"loading {c=} model")
-                            controlnet_map[c] = create_controlnet_model( c , is_sdxl)
+                            controlnet_map[c] = create_controlnet_model(pipe, c , is_sdxl)
                     else:
                         logger.info(f"invalid controlnet type for {'sdxl' if is_sdxl else 'sd15'} : {c}")
 
@@ -692,6 +719,13 @@ def load_controlnet_models(pipe: DiffusionPipeline, model_config: ModelConfig = 
 
 def unload_controlnet_models(pipe: AnimationPipeline):
     from animatediff.utils.util import show_gpu
+
+    if pipe.controlnet_map:
+        for c in pipe.controlnet_map:
+            controlnet = pipe.controlnet_map[c]
+            if isinstance(controlnet, ControlNetLLLite):
+                controlnet.unapply_to()
+                del controlnet
 
     #show_gpu("before uload controlnet")
     pipe.controlnet_map = None

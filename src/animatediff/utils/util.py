@@ -116,7 +116,6 @@ def get_resized_image2(org_image_path: str, size: int):
 
 
 def show_bytes(comment, obj):
-    return
 
     import sys
 #    memory_size = sys.getsizeof(tensor) + torch.numel(tensor)*tensor.element_size()
@@ -314,6 +313,38 @@ def prepare_lcm_lora():
             repo_id="latent-consistency/lcm-lora-sdv1-5", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/lcm_lora/sd15"
         )
 
+def prepare_lllite():
+    import os
+    from pathlib import PurePosixPath
+
+    from huggingface_hub import hf_hub_download
+
+    os.makedirs("data/models/lllite", exist_ok=True)
+    for hub_file in [
+        "bdsqlsz_controlllite_xl_canny.safetensors",
+        "bdsqlsz_controlllite_xl_depth.safetensors",
+        "bdsqlsz_controlllite_xl_dw_openpose.safetensors",
+        "bdsqlsz_controlllite_xl_lineart_anime_denoise.safetensors",
+        "bdsqlsz_controlllite_xl_mlsd_V2.safetensors",
+        "bdsqlsz_controlllite_xl_normal.safetensors",
+        "bdsqlsz_controlllite_xl_recolor_luminance.safetensors",
+        "bdsqlsz_controlllite_xl_segment_animeface_V2.safetensors",
+        "bdsqlsz_controlllite_xl_sketch.safetensors",
+        "bdsqlsz_controlllite_xl_softedge.safetensors",
+        "bdsqlsz_controlllite_xl_t2i-adapter_color_shuffle.safetensors",
+        "bdsqlsz_controlllite_xl_tile_anime_α.safetensors",        # alpha
+        "bdsqlsz_controlllite_xl_tile_anime_β.safetensors",        # beta
+    ]:
+        path = Path(hub_file)
+
+        saved_path = "data/models/lllite" / path
+
+        if os.path.exists(saved_path):
+            continue
+
+        hf_hub_download(
+            repo_id="bdsqlsz/qinglong_controlnet-lllite", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/lllite"
+        )
 
 
 def prepare_motion_module():

@@ -43,6 +43,7 @@ from animatediff.pipelines.animation import PromptEncoder, RegionMask
 from animatediff.pipelines.context import (get_context_scheduler,
                                            get_total_steps)
 from animatediff.sdxl_models.unet import UNet3DConditionModel
+from animatediff.utils.control_net_lllite import ControlNetLLLite
 from animatediff.utils.lpw_stable_diffusion_xl import \
     get_weighted_text_embeddings_sdxl2
 from animatediff.utils.util import (get_tensor_interpolation_method, show_gpu,
@@ -74,6 +75,8 @@ class PromptEncoderSDXL(PromptEncoder):
                 uncond_num = len(region_condi_list)
             else:
                 uncond_num = 1
+
+        self.uncond_num = uncond_num
 
         ### text
 
@@ -215,6 +218,9 @@ class PromptEncoderSDXL(PromptEncoder):
 
             self.ip_im_map_list = ip_im_map_list
             self.im_prompt_embeds_region_list = im_prompt_embeds_region_list
+
+    def is_uncond_layer(self, layer_index):
+        return self.uncond_num > layer_index
 
 
     def _get_current_prompt_embeds_from_text(
@@ -764,8 +770,13 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
         dtype,
         do_classifier_free_guidance=False,
         guess_mode=False,
+        do_normalize=False,
     ):
-        image = self.control_image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
+        if do_normalize == False:
+            image = self.control_image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
+        else:
+            image = self.image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
+
         image_batch_size = image.shape[0]
 
         if image_batch_size == 1:
@@ -1360,6 +1371,13 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
             controlnet_image_map= {key: {} for key in controlnet_type_map}
             for key_frame_no in controlnet_image_map_org:
                 for t, img in controlnet_image_map_org[key_frame_no].items():
+                    if isinstance( self.controlnet_map[t], ControlNetLLLite ):
+                        img_size = 1
+                        do_normalize=True
+                    else:
+                        img_size = prompt_encoder.get_condi_size()
+                        do_normalize=False
+                    c_dtype = torch.float16 #self.controlnet_map[t].dtype
                     tmp = self.prepare_image(
                         image=img,
                         width=width,
@@ -1368,11 +1386,12 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                         num_images_per_prompt=1,
                         #device=device,
                         device=latents_device,
-                        dtype=self.controlnet_map[t].dtype,
+                        dtype=c_dtype,
                         do_classifier_free_guidance=False,
                         guess_mode=False,
+                        do_normalize=do_normalize,
                     )
-                    controlnet_image_map[t][key_frame_no] = torch.cat([tmp] * prompt_encoder.get_condi_size())
+                    controlnet_image_map[t][key_frame_no] = torch.cat([tmp] * img_size)
 
             del controlnet_image_map_org
             torch.cuda.empty_cache()
@@ -1570,6 +1589,46 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                 # { "0_type_str" : (down_samples, mid_sample)  }
                 controlnet_result={}
 
+                def apply_lllite(context: List[int]):
+                    for type_str in controlnet_type_map:
+                        if not isinstance( self.controlnet_map[type_str] , ControlNetLLLite):
+                            continue
+
+                        cont_vars = get_controlnet_variable(type_str, i, len(timesteps), context)
+                        if not cont_vars:
+                            self.controlnet_map[type_str].set_multiplier(0.0)
+                            continue
+
+                        def get_index(l, x):
+                            return l.index(x) if x in l else -1
+
+                        zero_img = torch.zeros_like(cont_vars[0]["image"])
+
+                        scales=[0.0 for fr in context]
+                        imgs=[zero_img for fr in context]
+
+                        for cont_var in cont_vars:
+                            c_fr = cont_var["frame_no"]
+                            scale_index = str(c_fr) + "_" + type_str
+
+                            for s_i, fr in enumerate(controlnet_scale_map[scale_index]["frames"]):
+                                index = get_index(context, fr)
+                                if index != -1:
+                                    scales[index] = controlnet_scale_map[scale_index]["scales"][s_i]
+                                    imgs[index] = cont_var["image"]
+
+                        scales = [ s * cont_var["cond_scale"] for s in scales ]
+
+
+                        imgs = torch.cat(imgs).to(device=device, non_blocking=True)
+
+                        key= ".".join(map(str, context))
+                        key= type_str + "." + key
+
+                        self.controlnet_map[type_str].to(device=device)
+                        self.controlnet_map[type_str].set_cond_image(imgs,key)
+                        self.controlnet_map[type_str].set_multiplier(scales)
+
                 def get_controlnet_result(context: List[int] = None):
                     #logger.info(f"get_controlnet_result called {context=}")
 
@@ -1582,6 +1641,11 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                             hit=True
                             break
                     if hit == False:
+                        return None, None
+
+                    apply_lllite(context)
+
+                    if len(controlnet_result) == 0:
                         return None, None
 
                     _down_block_res_samples=[]
@@ -1677,6 +1741,10 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                             controlnet_result[fr][type_str] = sample_to_device(controlnet_result[fr][type_str])
 
                     for type_str in controlnet_type_map:
+
+                        if isinstance( self.controlnet_map[type_str] , ControlNetLLLite):
+                            continue
+
                         cont_vars = get_controlnet_variable(type_str, i, len(timesteps), target_frames)
                         if not cont_vars:
                             continue
