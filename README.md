@@ -689,7 +689,8 @@ animatediff tile-upscale output/2023-08-25T20-00-00-sample-mistoonanime_v20/00-3
 - [ProPainter](https://github.com/sczhou/ProPainter)
 - [rembg](https://github.com/danielgatis/rembg)
 - [anime-segmentation](https://github.com/SkyTNT/anime-segmentation)
-
+- [LCM-LoRA](https://github.com/luosiallen/latent-consistency-model)
+- [ControlNet-LLLite](https://github.com/kohya-ss/sd-scripts/blob/main/docs/train_lllite_README.md)
 <br>
 <br>
 <br>
