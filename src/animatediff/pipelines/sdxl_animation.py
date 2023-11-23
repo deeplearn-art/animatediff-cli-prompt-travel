@@ -1572,10 +1572,16 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
 
         if self.lora_map:
             self.lora_map.to(device, self.unet.dtype)
+        if self.lcm:
+            self.lcm.to(device, self.unet.dtype)
 
         with self.progress_bar(total=total_steps) as progress_bar:
 
             for i, t in enumerate(timesteps):
+
+                if self.lcm:
+                    self.lcm.apply(i, len(timesteps))
+
 
                 noise_pred = torch.zeros(
                     (latents.shape[0] * condi_size, *latents.shape[1:]),

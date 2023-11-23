@@ -368,7 +368,7 @@ def generate(
         logger.info("Pipeline already loaded, skipping initialization")
         # reload TIs; create_pipeline does this for us, but they may have changed
         # since load time if we're being called from another package
-        load_text_embeddings(g_pipeline, is_sdxl=is_sdxl)
+        #load_text_embeddings(g_pipeline, is_sdxl=is_sdxl)
         pipeline_already_loaded = True
 
     load_controlnet_models(pipe=g_pipeline, model_config=model_config, is_sdxl=is_sdxl)
@@ -383,6 +383,11 @@ def generate(
         )
 
         torch.cuda.empty_cache()
+
+    apply_lcm_lora = False
+    if model_config.lcm_map:
+        if "enable" in model_config.lcm_map:
+            apply_lcm_lora = model_config.lcm_map["enable"]
 
     # save raw config to output directory
     save_config_path = save_dir.joinpath("raw_prompt.json")
@@ -456,7 +461,7 @@ def generate(
                 output_map = model_config.output,
                 is_single_prompt_mode=model_config.is_single_prompt_mode,
                 is_sdxl=is_sdxl,
-                apply_lcm_lora=model_config.apply_lcm_lora
+                apply_lcm_lora=apply_lcm_lora
             )
             outputs.append(output)
             torch.cuda.empty_cache()

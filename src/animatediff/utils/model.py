@@ -65,7 +65,7 @@ def fix_checkpoint_if_needed(checkpoint: Path, debug:bool):
     try:
         pipeline = StableDiffusionPipeline.from_single_file(
             pretrained_model_link_or_path=str(checkpoint.absolute()),
-            local_files_only=True,
+            local_files_only=False,
             load_safety_checker=False,
         )
         logger.info("This file works fine.")
@@ -126,7 +126,7 @@ def checkpoint_to_pipeline(
 
     pipeline = StableDiffusionPipeline.from_single_file(
         pretrained_model_link_or_path=str(checkpoint.absolute()),
-        local_files_only=True,
+        local_files_only=False,
         load_safety_checker=False,
     )
 
@@ -147,7 +147,7 @@ def checkpoint_to_pipeline_sdxl(
 
     pipeline = StableDiffusionXLPipeline.from_single_file(
         pretrained_model_link_or_path=str(checkpoint.absolute()),
-        local_files_only=True,
+        local_files_only=False,
         load_safety_checker=False,
     )
 

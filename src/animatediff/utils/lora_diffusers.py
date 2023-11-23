@@ -129,6 +129,10 @@ class LoRAModule(torch.nn.Module):
 
         self.lora_dim = lora_dim
 
+        self.need_rearrange = False
+        if org_module.__class__.__name__ == "InflatedConv3d":
+            self.need_rearrange = True
+
         if org_module.__class__.__name__ == "Conv2d" or org_module.__class__.__name__ == "LoRACompatibleConv" or org_module.__class__.__name__ == "InflatedConv3d":
             kernel_size = org_module.kernel_size
             stride = org_module.stride
@@ -171,9 +175,19 @@ class LoRAModule(torch.nn.Module):
     # forward with lora
     # scale is used LoRACompatibleConv, but we ignore it because we have multiplier
     def forward(self, x, scale=1.0):
+        from einops import rearrange
         if not self.enabled:
             return self.org_forward(x)
-        return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
+
+        if self.need_rearrange:
+            org = self.org_forward(x)
+            frames = x.shape[2]
+            x = rearrange(x, "b c f h w -> (b f) c h w")
+            x = self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
+            x = rearrange(x, "(b f) c h w -> b c f h w", f=frames)
+            return org + x
+        else:
+            return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
 
     def set_network(self, network):
         self.network = network

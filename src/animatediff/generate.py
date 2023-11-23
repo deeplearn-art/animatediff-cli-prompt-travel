@@ -529,14 +529,26 @@ def create_pipeline_sdxl(
 
     torch.cuda.empty_cache()
 
-    if model_config.apply_lcm_lora:
-        prepare_lcm_lora()
-        load_lcm_lora(pipeline, model_config.lcm_lora_scale, is_sdxl=True)
+    pipeline.lcm = None
+    if model_config.lcm_map:
+        if model_config.lcm_map["enable"]:
+            prepare_lcm_lora()
+            load_lcm_lora(pipeline, model_config.lcm_map, is_sdxl=True)
 
     load_lora_map(pipeline, model_config.lora_map, video_length, is_sdxl=True)
 
+    pipeline.unet = pipeline.unet.half()
+    pipeline.text_encoder = pipeline.text_encoder.half()
+    pipeline.text_encoder_2 = pipeline.text_encoder_2.half()
+
     # Load TI embeddings
+    pipeline.text_encoder = pipeline.text_encoder.to("cuda")
+    pipeline.text_encoder_2 = pipeline.text_encoder_2.to("cuda")
+
     load_text_embeddings(pipeline, is_sdxl=True)
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cpu")
+    pipeline.text_encoder_2 = pipeline.text_encoder_2.to("cpu")
 
     return pipeline
 
@@ -678,14 +690,23 @@ def create_pipeline(
         controlnet_map=None,
     )
 
-    if model_config.apply_lcm_lora:
-        prepare_lcm_lora()
-        load_lcm_lora(pipeline, model_config.lcm_lora_scale, is_sdxl=False)
+    pipeline.lcm = None
+    if model_config.lcm_map:
+        if model_config.lcm_map["enable"]:
+            prepare_lcm_lora()
+            load_lcm_lora(pipeline, model_config.lcm_map, is_sdxl=False)
 
     load_lora_map(pipeline, model_config.lora_map, video_length)
 
     # Load TI embeddings
+    pipeline.unet = pipeline.unet.half()
+    pipeline.text_encoder = pipeline.text_encoder.half()
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cuda")
+
     load_text_embeddings(pipeline)
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cpu")
 
     return pipeline
 
@@ -844,7 +865,14 @@ def create_us_pipeline(
             load_safetensors_lora2(pipeline.text_encoder, pipeline.unet, lora_path, alpha=alpha,is_animatediff=False)
 
     # Load TI embeddings
+    pipeline.unet = pipeline.unet.half()
+    pipeline.text_encoder = pipeline.text_encoder.half()
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cuda")
+
     load_text_embeddings(pipeline)
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cpu")
 
     return pipeline
 

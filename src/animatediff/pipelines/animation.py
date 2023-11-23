@@ -2682,6 +2682,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             for i, t in enumerate(timesteps):
                 stopwatch_start()
 
+                if self.lcm:
+                    self.lcm.apply(i, len(timesteps))
+
                 noise_pred = torch.zeros(
                     (latents.shape[0] * prompt_encoder.get_condi_size(), *latents.shape[1:]),
                     device=latents.device,

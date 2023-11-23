@@ -71,6 +71,10 @@ def send_to_device(
         if pipeline.lora_map:
             pipeline.lora_map.to(device=device, dtype=unet_dtype)
 
+    if hasattr(pipeline, 'lcm'):
+        if pipeline.lcm:
+            pipeline.lcm.to(device=device, dtype=unet_dtype)
+
     pipeline.unet = pipeline.unet.to(device=device, dtype=unet_dtype, memory_format=model_memory_format)
     pipeline.text_encoder = pipeline.text_encoder.to(device=device, dtype=tenc_dtype)
     pipeline.vae = pipeline.vae.to(device=device, dtype=vae_dtype, memory_format=model_memory_format)
