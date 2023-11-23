@@ -188,8 +188,13 @@ Almost same as the original animatediff-cli, but with a slight change in config 
 {
   "name": "sample",
   "path": "share/Stable-diffusion/mistoonAnime_v20.safetensors",  # Specify Checkpoint as a path relative to /animatediff-cli/data
-  "apply_lcm_lora": false,             # lcm-lora
-  "lcm_lora_scale": 1.0,               # lcm-lora
+  "lcm_map":{     # lcm-lora
+    "enable":false,
+    "start_scale":0.15,
+    "end_scale":0.75,
+    "gradient_start":0.2,
+    "gradient_end":0.75
+  },
   "vae_path":"share/VAE/vae-ft-mse-840000-ema-pruned.ckpt",       # Specify vae as a path relative to /animatediff-cli/data
   "motion_module": "models/motion-module/mm_sd_v14.ckpt",         # Specify motion module as a path relative to /animatediff-cli/data
   "compile": false,
