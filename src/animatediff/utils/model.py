@@ -39,6 +39,7 @@ def get_base_model(model_name_or_path: str, local_dir: Path, force: bool = False
         if model_save_dir.joinpath("model_index.json").exists():
             logger.debug(f"Base model already downloaded to: {path_from_cwd(model_save_dir)}")
         else:
+            logger.debug(f"could not find {model_save_dir}/model_index.json ")
             logger.info(f"Downloading base model from {model_name_or_path}...")
             if is_sdxl:
                 _ = get_hf_pipeline_sdxl(model_name_or_path, model_save_dir, save=True, force_download=force)
