@@ -64,7 +64,7 @@ pipeline_dir = data_dir.joinpath("models/huggingface")
 
 import sys
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     stream=sys.stdout,
     format="%(message)s",
     datefmt="%H:%M:%S",
