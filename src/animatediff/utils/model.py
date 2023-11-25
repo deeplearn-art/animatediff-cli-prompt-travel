@@ -32,7 +32,9 @@ def get_base_model(model_name_or_path: str, local_dir: Path, force: bool = False
 
     model_save_dir = local_dir.joinpath(str(model_name_or_path).split("/")[-1]).resolve()
     model_is_repo_id = False if model_name_or_path.joinpath("model_index.json").exists() else True
-
+    logger.debug(f"model_name_or_path {model_name_or_path}")
+    logger.debug(f"local_dir {local_dir}")
+    logger.debug(f"model_save_dir {model_save_dir}")
     # if we have a HF repo ID, download it
     if model_is_repo_id:
         logger.debug("Base model is a HuggingFace repo ID")
