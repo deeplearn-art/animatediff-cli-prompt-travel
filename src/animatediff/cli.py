@@ -96,13 +96,12 @@ except ImportError:
     logger.debug("RIFE not available, skipping...", exc_info=True)
     rife_app = None
 
-
-from animatediff.stylize import stylize
-
-cli.add_typer(stylize, name="stylize")
-
-
-
+try:
+    import onnxruntime
+    from animatediff.stylize import stylize
+    cli.add_typer(stylize, name="stylize")
+except:
+    pass
 
 # mildly cursed globals to allow for reuse of the pipeline if we're being called as a module
 g_pipeline: Optional[DiffusionPipeline] = None
