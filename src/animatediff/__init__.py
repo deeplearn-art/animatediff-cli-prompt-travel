@@ -8,7 +8,7 @@ except ImportError:
     version_tuple = (0, 0, "unknown", "noinfo")
 
 from functools import lru_cache
-from os import getenv
+from os import getenv, environ
 from pathlib import Path
 from warnings import filterwarnings
 
@@ -17,7 +17,8 @@ from tqdm import TqdmExperimentalWarning
 
 PACKAGE = __package__.replace("_", "-")
 PACKAGE_ROOT = Path(__file__).parent.parent
-
+environ['TRANSFORMERS_CACHE'] = "/src/.cache"
+environ['HF_HOME'] = "/src/.cache/huggingface"
 HF_HOME = Path(getenv("HF_HOME", Path.home() / ".cache" / "huggingface"))
 HF_HUB_CACHE = Path(getenv("HUGGINGFACE_HUB_CACHE", HF_HOME.joinpath("hub")))
 

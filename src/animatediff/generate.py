@@ -28,7 +28,7 @@ from transformers import (AutoImageProcessor, CLIPImageProcessor,
                           UperNetForSemanticSegmentation)
 
 from animatediff import get_dir
-from animatediff.dwpose import DWposeDetector
+
 from animatediff.models.clip import CLIPSkipTextModel
 from animatediff.models.unet import UNet3DConditionModel
 from animatediff.pipelines import AnimationPipeline, load_text_embeddings
@@ -112,6 +112,7 @@ lllite_address_table_sdxl={
 try:
     import onnxruntime
     onnxruntime_installed = True
+    from animatediff.dwpose import DWposeDetector
 except:
     onnxruntime_installed = False
 
