@@ -295,7 +295,7 @@ def create_controlnet_model(pipe, type_str, is_sdxl):
             if len(addr) == 1:
                 return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16, local_files_only=True)
             else:
-                return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float1,local_files_only=True)
+                return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16,local_files_only=True)
         else:
             raise ValueError(f"unknown controlnet type {type_str}")
     else:
