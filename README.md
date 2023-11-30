@@ -709,6 +709,7 @@ animatediff tile-upscale output/2023-08-25T20-00-00-sample-mistoonanime_v20/00-3
 - [anime-segmentation](https://github.com/SkyTNT/anime-segmentation)
 - [LCM-LoRA](https://github.com/luosiallen/latent-consistency-model)
 - [ControlNet-LLLite](https://github.com/kohya-ss/sd-scripts/blob/main/docs/train_lllite_README.md)
+- [Gradual Latent hires fix](https://github.com/kohya-ss/sd-scripts/tree/gradual_latent_hires_fix)
 <br>
 <br>
 <br>
