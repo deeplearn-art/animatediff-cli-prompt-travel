@@ -191,11 +191,11 @@ def generate(
             "-C",
             min=1,
             max=32,
-            help="Number of frames to condition on (default: max of <length> or 32). max for motion module v1 is 24",
+            help="Number of frames to condition on (default: 16",
             show_default=False,
             rich_help_panel="Generation",
         ),
-    ] = None,
+    ] = 16,
     overlap: Annotated[
         Optional[int],
         typer.Option(
@@ -461,7 +461,8 @@ def generate(
                 output_map = model_config.output,
                 is_single_prompt_mode=model_config.is_single_prompt_mode,
                 is_sdxl=is_sdxl,
-                apply_lcm_lora=apply_lcm_lora
+                apply_lcm_lora=apply_lcm_lora,
+                gradual_latent_map=model_config.gradual_latent_hires_fix_map
             )
             outputs.append(output)
             torch.cuda.empty_cache()

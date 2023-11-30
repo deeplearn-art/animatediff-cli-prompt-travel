@@ -574,6 +574,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
     controlnet_map: Dict[ str , ControlNetModel ]
     ip_adapter: IPAdapter = None
 
+    model_cpu_offload_seq = "text_encoder->unet->vae"
+
     def __init__(
         self,
         vae: AutoencoderKL,
@@ -689,7 +691,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         """
         self.vae.disable_tiling()
 
-    def enable_model_cpu_offload(self, gpu_id=0):
+    def __enable_model_cpu_offload(self, gpu_id=0):
         r"""
         Offloads all models to CPU using accelerate, reducing memory usage with a low impact on performance. Compared
         to `enable_sequential_cpu_offload`, this method moves one whole model at a time to the GPU when its `forward`
@@ -997,7 +999,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         video = []
         for frame_idx in range(latents.shape[0]):
             video.append(
-                self.vae.decode(latents[frame_idx : frame_idx + 1].to(self.vae.device, self.vae.dtype)).sample.cpu()
+#                self.vae.decode(latents[frame_idx : frame_idx + 1].to(self.vae.device, self.vae.dtype)).sample.cpu()
+                self.vae.decode(latents[frame_idx : frame_idx + 1].to("cuda", self.vae.dtype)).sample.cpu()
             )
         video = torch.cat(video)
         video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
@@ -1162,27 +1165,27 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         image_latents = None
 
         if img2img_map:
-            image_latents = torch.zeros(shape, device=self.unet.device, dtype=self.vae.dtype)
+            image_latents = torch.zeros(shape, device=device, dtype=dtype)
             for frame_no in img2img_map["images"]:
                 img = img2img_map["images"][frame_no]
                 img = self.image_processor.preprocess(img)
-                img = img.to(device=self.unet.device, dtype=self.vae.dtype)
+                img = img.to(device="cuda", dtype=self.vae.dtype)
                 img = self.vae.encode(img).latent_dist.sample(generator)
                 img = self.vae.config.scaling_factor * img
                 img = torch.cat([img], dim=0)
-                image_latents[:,:,frame_no,:,:] = img
+                image_latents[:,:,frame_no,:,:] = img.to(device=device, dtype=dtype)
+
         else:
             is_strength_max = True
 
 
         if latents is None:
-            noise = randn_tensor(shape, generator=generator, device=self.unet.device, dtype=dtype)
+            noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
             latents = noise if is_strength_max else self.scheduler.add_noise(image_latents, noise, timestep)
             latents = latents * self.scheduler.init_noise_sigma if is_strength_max else latents
         else:
             noise = latents.to(device)
             latents = noise * self.scheduler.init_noise_sigma
-
 
         outputs = (latents.to(device, dtype),)
 
@@ -2370,10 +2373,14 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         interpolation_factor = 1,
         is_single_prompt_mode = False,
         apply_lcm_lora= False,
+        gradual_latent_map=None,
         **kwargs,
     ):
         global C_REF_MODE
 
+        gradual_latent = False
+        if gradual_latent_map:
+            gradual_latent = gradual_latent_map["enable"]
 
         logger.info(f"{apply_lcm_lora=}")
         if apply_lcm_lora:
@@ -2676,11 +2683,69 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             context_overlap,
         )
 
+        lat_height, lat_width = latents.shape[-2:]
+
+        def gradual_latent_scale(progress):
+            if gradual_latent:
+                cur = 0.5
+                for s in gradual_latent_map["scale"]:
+                    v = gradual_latent_map["scale"][s]
+                    if float(s) > progress:
+                        return cur
+                    cur = v
+                return cur
+            else:
+                return 1.0
+        def gradual_latent_size(progress):
+            if gradual_latent:
+                current_ratio = gradual_latent_scale(progress)
+                h = int(lat_height * current_ratio) // 8 * 8
+                w = int(lat_width * current_ratio) // 8 * 8
+                return (h,w)
+            else:
+                return (lat_height, lat_width)
+
+        def unsharp_mask(img):
+            imgf = img.float()
+            k = 0.05 # strength
+            kernel = torch.FloatTensor([[0,   -k,    0],
+                                        [-k, 1+4*k, -k],
+                                        [0,   -k,    0]])
+
+            conv_kernel = torch.eye(4)[..., None, None] * kernel[None, None, ...]
+            imgf = torch.nn.functional.conv2d(imgf, conv_kernel.to(img.device), padding=1)
+            return imgf.to(img.dtype)
+
+        def resize_tensor(ten, size, do_unsharp_mask=False):
+            ten = rearrange(ten, "b c f h w -> (b f) c h w")
+            ten = torch.nn.functional.interpolate(
+                ten.float(), size=size, mode="bicubic", align_corners=False
+            ).to(ten.dtype)
+            if do_unsharp_mask:
+                ten = unsharp_mask(ten)
+            return rearrange(ten, "(b f) c h w -> b c f h w", f=video_length)
+
+        if gradual_latent:
+            latents = resize_tensor(latents, gradual_latent_size(0))
+            reverse_steps = gradual_latent_map["reverse_steps"]
+            noise_add_count = gradual_latent_map["noise_add_count"]
+            total_steps = ((total_steps/num_inference_steps) * (reverse_steps* (len(gradual_latent_map["scale"].keys()) - 1) )) + total_steps
+            total_steps = int(total_steps)
+
+        prev_gradient_latent_size = gradual_latent_size(0)
+
+
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=total_steps) as progress_bar:
-            for i, t in enumerate(timesteps):
+            i = 0
+            real_i = 0
+#            for i, t in enumerate(timesteps):
+            while i < len(timesteps):
+                t = timesteps[i]
                 stopwatch_start()
+
+                cur_gradient_latent_size = gradual_latent_size((real_i+1) / len(timesteps))
 
                 if self.lcm:
                     self.lcm.apply(i, len(timesteps))
@@ -2858,11 +2923,19 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 mid_sample = torch.cat(__mid_list)
 
                             else:
+                                cont_var_img = cont_var["image"].to(device=device)
+
+                                if gradual_latent:
+                                    cur_lat_height, cur_lat_width = latents.shape[-2:]
+                                    cont_var_img = torch.nn.functional.interpolate(
+                                        cont_var_img.float(), size=(cur_lat_height*8, cur_lat_width*8), mode="bicubic", align_corners=False
+                                    ).to(cont_var_img.dtype)
+
                                 down_samples, mid_sample = self.controlnet_map[type_str](
                                     control_model_input,
                                     t,
                                     encoder_hidden_states=controlnet_prompt_embeds.to(device=device),
-                                    controlnet_cond=cont_var["image"].to(device=device),
+                                    controlnet_cond=cont_var_img,
                                     conditioning_scale=cont_var["cond_scale"],
                                     guess_mode=cont_var["guess_mode"],
                                     return_dict=False,
@@ -3075,6 +3148,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     video = torch.from_numpy(self.decode_latents(denoised))
                     callback(i, video)
 
+                if gradual_latent:
+                    if prev_gradient_latent_size != cur_gradient_latent_size:
+                        noise_pred = resize_tensor(noise_pred, cur_gradient_latent_size, True)
+                        latents = resize_tensor(latents, cur_gradient_latent_size, True)
+
+
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(
                     model_output=noise_pred,
@@ -3092,6 +3171,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                 for r_no in range(len(region_list)):
                     mask = region_mask.get_mask( r_no )
+                    if gradual_latent:
+                        mask = resize_tensor(mask, cur_gradient_latent_size)
                     src = region_list[r_no]["src"]
                     if src == -1:
                         init_latents_proper = image_latents[:1]
@@ -3102,7 +3183,11 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 init_latents_proper, noise, torch.tensor([noise_timestep])
                             )
 
-                        lat = init_latents_proper
+                        if gradual_latent:
+                            lat = resize_tensor(init_latents_proper, cur_gradient_latent_size)
+                        else:
+                            lat = init_latents_proper
+
                     else:
                         lat = latents_list[src]
 
@@ -3114,6 +3199,23 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 lat = None
                 latents_list = None
                 tmp_latent = None
+
+                i+=1
+                real_i = max(i, real_i)
+                if gradual_latent:
+                    if prev_gradient_latent_size != cur_gradient_latent_size:
+                        reverse = min(i, reverse_steps)
+                        self.scheduler._step_index -= reverse
+                        _noise = resize_tensor(noise, cur_gradient_latent_size)
+                        for count in range(i, i+noise_add_count):
+                            count = min(count,len(timesteps)-1)
+                            latents = self.scheduler.add_noise(
+                                latents, _noise, torch.tensor([timesteps[count]])
+                            )
+                        i -= reverse
+                        torch.cuda.empty_cache()
+
+                prev_gradient_latent_size = cur_gradient_latent_size
 
                 stopwatch_stop("LOOP end")
 

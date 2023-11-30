@@ -103,6 +103,7 @@ class ModelConfig(BaseSettings):
     vae_path: str = ""  # Path to the model
     motion_module: Path = Field(...)  # Path to the motion module
     lcm_map: Dict[str,Any]= Field({})
+    gradual_latent_hires_fix_map: Dict[str,Any]= Field({})
     compile: bool = Field(False)  # whether to compile the model with TorchDynamo
     tensor_interpolation_slerp: bool = Field(True)
     seed: list[int] = Field([])  # Seed(s) for the random number generators

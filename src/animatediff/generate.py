@@ -35,7 +35,7 @@ from animatediff.pipelines import AnimationPipeline, load_text_embeddings
 from animatediff.pipelines.lora import load_lcm_lora, load_lora_map
 from animatediff.pipelines.pipeline_controlnet_img2img_reference import \
     StableDiffusionControlNetImg2ImgReferencePipeline
-from animatediff.schedulers import get_scheduler
+from animatediff.schedulers import DiffusionScheduler, get_scheduler
 from animatediff.settings import InferenceConfig, ModelConfig
 from animatediff.utils.control_net_lllite import (ControlNetLLLite,
                                                   load_controlnet_lllite)
@@ -605,6 +605,13 @@ def create_pipeline(
     feature_extractor = CLIPImageProcessor.from_pretrained(base_model, subfolder="feature_extractor")
 
     # set up scheduler
+    if model_config.gradual_latent_hires_fix_map:
+        if "enable" in model_config.gradual_latent_hires_fix_map:
+            if model_config.gradual_latent_hires_fix_map["enable"]:
+                if model_config.scheduler != DiffusionScheduler.euler_a:
+                    model_config.scheduler = DiffusionScheduler.euler_a
+                    logger.warn("gradual_latent_hires_fix enable -> Change scheduler to euler_a")
+
     sched_kwargs = infer_config.noise_scheduler_kwargs
     scheduler = get_scheduler(model_config.scheduler, sched_kwargs)
     logger.info(f'Using scheduler "{model_config.scheduler}" ({scheduler.__class__.__name__})')
@@ -1429,6 +1436,7 @@ def run_inference(
     is_single_prompt_mode: bool = False,
     is_sdxl:bool=False,
     apply_lcm_lora:bool=False,
+    gradual_latent_map: Dict[str,Any] = None,
 ):
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 
@@ -1484,6 +1492,7 @@ def run_inference(
         interpolation_factor=1,
         is_single_prompt_mode=is_single_prompt_mode,
         apply_lcm_lora=apply_lcm_lora,
+        gradual_latent_map=gradual_latent_map,
         callback=callback,
         callback_steps=output_map.get("preview_steps"),
     )

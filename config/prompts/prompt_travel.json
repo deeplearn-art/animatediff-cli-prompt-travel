@@ -8,6 +8,15 @@
     "gradient_start":0.2,
     "gradient_end":0.75
   },
+  "gradual_latent_hires_fix_map":{
+    "enable": false,
+    "scale": {
+      "0": 0.5,
+      "0.7": 1.0
+    },
+    "reverse_steps": 5,
+    "noise_add_count":3
+  },
   "motion_module": "models/motion-module/mm_sd_v15_v2.ckpt",
   "compile": false,
   "seed": [
@@ -51,8 +60,8 @@
   },
   "controlnet_map": {
     "input_image_dir" : "controlnet_image/test",
-    "max_samples_on_vram": 200,
-    "max_models_on_vram" : 3,
+    "max_samples_on_vram": 0,
+    "max_models_on_vram" : 0,
     "save_detectmap": true,
     "preprocess_on_gpu": true,
     "is_loop": true,

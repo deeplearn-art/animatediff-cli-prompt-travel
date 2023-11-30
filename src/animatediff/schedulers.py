@@ -1,19 +1,14 @@
 import logging
 from enum import Enum
 
-from diffusers.schedulers import (
-    DDIMScheduler,
-    DPMSolverMultistepScheduler,
-    DPMSolverSinglestepScheduler,
-    EulerAncestralDiscreteScheduler,
-    EulerDiscreteScheduler,
-    HeunDiscreteScheduler,
-    KDPM2AncestralDiscreteScheduler,
-    KDPM2DiscreteScheduler,
-    LMSDiscreteScheduler,
-    PNDMScheduler,
-    UniPCMultistepScheduler,
-)
+from diffusers.schedulers import (DDIMScheduler, DPMSolverMultistepScheduler,
+                                  DPMSolverSinglestepScheduler,
+                                  EulerAncestralDiscreteScheduler,
+                                  EulerDiscreteScheduler,
+                                  HeunDiscreteScheduler,
+                                  KDPM2AncestralDiscreteScheduler,
+                                  KDPM2DiscreteScheduler, LMSDiscreteScheduler,
+                                  PNDMScheduler, UniPCMultistepScheduler)
 
 logger = logging.getLogger(__name__)
 
