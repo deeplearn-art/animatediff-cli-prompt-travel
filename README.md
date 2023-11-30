@@ -195,6 +195,19 @@ Almost same as the original animatediff-cli, but with a slight change in config 
     "gradient_start":0.2,
     "gradient_end":0.75
   },
+  "gradual_latent_hires_fix_map":{ # gradual latent hires fix
+    # This is an option to address the problem of chaos being generated when the model is generated beyond its proper size.
+    # It also has the effect of increasing generation speed.
+    "enable": false,    # enable/disable
+    "scale": {    # "DENOISE PROGRESS" : LATENT SCALE format
+      # In this example, Up to 70% of the total denoise, latent is halved to the specified size.
+      # From 70% to the end, calculate the size as specified.
+      "0": 0.5,
+      "0.7": 1.0
+    },
+    "reverse_steps": 5,          # Number of reversal steps at latent size switching timing
+    "noise_add_count":3          # Additive amount of noise　at latent size switching timing
+  },
   "vae_path":"share/VAE/vae-ft-mse-840000-ema-pruned.ckpt",       # Specify vae as a path relative to /animatediff-cli/data
   "motion_module": "models/motion-module/mm_sd_v14.ckpt",         # Specify motion module as a path relative to /animatediff-cli/data
   "compile": false,
