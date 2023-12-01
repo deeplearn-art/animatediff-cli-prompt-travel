@@ -7,14 +7,16 @@ from diffusers.schedulers import (DDIMScheduler, DPMSolverMultistepScheduler,
                                   EulerDiscreteScheduler,
                                   HeunDiscreteScheduler,
                                   KDPM2AncestralDiscreteScheduler,
-                                  KDPM2DiscreteScheduler, LMSDiscreteScheduler,
-                                  PNDMScheduler, UniPCMultistepScheduler)
+                                  KDPM2DiscreteScheduler, LCMScheduler,
+                                  LMSDiscreteScheduler, PNDMScheduler,
+                                  UniPCMultistepScheduler)
 
 logger = logging.getLogger(__name__)
 
 
 # See https://github.com/huggingface/diffusers/issues/4167 for more details on sched mapping from A1111
 class DiffusionScheduler(str, Enum):
+    lcm = "lcm"    # LCM
     ddim = "ddim"  # DDIM
     pndm = "pndm"  # PNDM
     heun = "heun"  # Heun
@@ -49,6 +51,8 @@ def get_scheduler(name: str, config: dict = {}):
         config["use_karras_sigmas"] = True
 
     match name:
+        case DiffusionScheduler.lcm:
+            sched_class = LCMScheduler
         case DiffusionScheduler.ddim:
             sched_class = DDIMScheduler
         case DiffusionScheduler.pndm:

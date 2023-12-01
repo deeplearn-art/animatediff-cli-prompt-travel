@@ -435,6 +435,16 @@ def create_pipeline_sdxl(
     scheduler = get_scheduler(model_config.scheduler, sched_kwargs)
     logger.info(f'Using scheduler "{model_config.scheduler}" ({scheduler.__class__.__name__})')
 
+    if model_config.gradual_latent_hires_fix_map:
+        if "enable" in model_config.gradual_latent_hires_fix_map:
+            if model_config.gradual_latent_hires_fix_map["enable"]:
+                if model_config.scheduler not in (DiffusionScheduler.euler_a, DiffusionScheduler.lcm):
+                    logger.warn("gradual_latent_hires_fix enable")
+                    logger.warn(f"{model_config.scheduler=}")
+                    logger.warn("If you are forced to exit with an error, change to euler_a or lcm")
+
+
+
     # Load the checkpoint weights into the pipeline
     if model_config.path is not None:
         model_path = data_dir.joinpath(model_config.path)
@@ -608,9 +618,10 @@ def create_pipeline(
     if model_config.gradual_latent_hires_fix_map:
         if "enable" in model_config.gradual_latent_hires_fix_map:
             if model_config.gradual_latent_hires_fix_map["enable"]:
-                if model_config.scheduler != DiffusionScheduler.euler_a:
-                    model_config.scheduler = DiffusionScheduler.euler_a
-                    logger.warn("gradual_latent_hires_fix enable -> Change scheduler to euler_a")
+                if model_config.scheduler not in (DiffusionScheduler.euler_a, DiffusionScheduler.lcm):
+                    logger.warn("gradual_latent_hires_fix enable")
+                    logger.warn(f"{model_config.scheduler=}")
+                    logger.warn("If you are forced to exit with an error, change to euler_a or lcm")
 
     sched_kwargs = infer_config.noise_scheduler_kwargs
     scheduler = get_scheduler(model_config.scheduler, sched_kwargs)
