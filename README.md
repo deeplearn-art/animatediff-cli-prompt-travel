@@ -8,7 +8,25 @@ It seems to work surprisingly well!
 
 ### Example
 
-- more example [here](example.md)
+- gradual latent hires fix
+- sd15 512x856 / sd15 768x1280 / sd15 768x1280 with gradual latent hires fix
+
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/346c0541-7f05-4c45-ab2a-911bc0942fa8" muted="false"></video></div>
+<br>
+
+
+- [sdxl turbo lora](https://civitai.com/models/215485?modelVersionId=242807)
+- more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/184)
+
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/15c39ac2-3853-44f5-b08c-142c90985c4b" muted="false"></video></div>
+<br>
+
+<br>
+
+[Click here to see old samples.](example.md)
+
+<br>
+<br>
 
 
 ### Installation(for windows)
