@@ -47,7 +47,8 @@ from animatediff.utils.model import (ensure_motion_modules,
 from animatediff.utils.util import (get_resized_image, get_resized_image2,
                                     get_resized_images,
                                     get_tensor_interpolation_method,
-                                    prepare_dwpose, prepare_ip_adapter,
+                                    prepare_dwpose, prepare_extra_controlnet,
+                                    prepare_ip_adapter,
                                     prepare_ip_adapter_sdxl, prepare_lcm_lora,
                                     prepare_lllite, prepare_motion_module,
                                     save_frames, save_imgs, save_video)
@@ -70,6 +71,7 @@ controlnet_address_table={
     "qr_code_monster_v1" : ['monster-labs/control_v1p_sd15_qrcode_monster'],
     "qr_code_monster_v2" : ['monster-labs/control_v1p_sd15_qrcode_monster', 'v2'],
     "controlnet_mediapipe_face" : ['CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"],
+    "animatediff_controlnet" : [None, "data/models/controlnet/animatediff_controlnet/controlnet_checkpoint.ckpt"]
 }
 
 # Edit this table if you want to change to another controlnet checkpoint
@@ -284,17 +286,47 @@ def is_valid_controlnet_type(type_str, is_sdxl):
     else:
         return (type_str in controlnet_address_table_sdxl) or (type_str in lllite_address_table_sdxl)
 
+def load_controlnet_from_file(file_path, torch_dtype):
+    from safetensors.torch import load_file
 
+    prepare_extra_controlnet()
 
+    file_path = Path(file_path)
+
+    if file_path.exists() and file_path.is_file():
+        if file_path.suffix.lower() in [".pth", ".pt", ".ckpt"]:
+            controlnet_state_dict = torch.load(file_path, map_location="cpu", weights_only=True)
+        elif file_path.suffix.lower() == ".safetensors":
+            controlnet_state_dict = load_file(file_path, device="cpu")
+        else:
+            raise RuntimeError(
+                f"unknown file format for controlnet weights: {file_path.suffix}"
+            )
+    else:
+        raise FileNotFoundError(f"no controlnet weights found in {file_path}")
+
+    if file_path.parent.name == "animatediff_controlnet":
+        model = ControlNetModel(cross_attention_dim=768)
+    else:
+        model = ControlNetModel()
+
+    missing, _ = model.load_state_dict(controlnet_state_dict["state_dict"], strict=False)
+    if len(missing) > 0:
+        logger.info(f"ControlNetModel has missing keys: {missing}")
+
+    return model.to(dtype=torch_dtype)
 
 def create_controlnet_model(pipe, type_str, is_sdxl):
     if not is_sdxl:
         if type_str in controlnet_address_table:
             addr = controlnet_address_table[type_str]
-            if len(addr) == 1:
-                return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16)
+            if addr[0] != None:
+                if len(addr) == 1:
+                    return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16)
+                else:
+                    return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16)
             else:
-                return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16)
+                return load_controlnet_from_file(addr[1],torch_dtype=torch.float16)
         else:
             raise ValueError(f"unknown controlnet type {type_str}")
     else:

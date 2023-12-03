@@ -52,6 +52,7 @@ controlnet_dirs = [
     "qr_code_monster_v1",
     "qr_code_monster_v2",
     "controlnet_mediapipe_face",
+    "animatediff_controlnet",
     ]
 
 def create_controlnet_dir(controlnet_root):

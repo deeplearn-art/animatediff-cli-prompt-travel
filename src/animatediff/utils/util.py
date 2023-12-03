@@ -347,6 +347,28 @@ def prepare_lllite():
         )
 
 
+def prepare_extra_controlnet():
+    import os
+    from pathlib import PurePosixPath
+
+    from huggingface_hub import hf_hub_download
+
+    os.makedirs("data/models/controlnet/animatediff_controlnet", exist_ok=True)
+    for hub_file in [
+        "controlnet_checkpoint.ckpt"
+    ]:
+        path = Path(hub_file)
+
+        saved_path = "data/models/controlnet/animatediff_controlnet" / path
+
+        if os.path.exists(saved_path):
+            continue
+
+        hf_hub_download(
+            repo_id="crishhh/animatediff_controlnet", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/controlnet/animatediff_controlnet"
+        )
+
+
 def prepare_motion_module():
     import os
     from pathlib import PurePosixPath
