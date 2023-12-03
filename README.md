@@ -8,6 +8,14 @@ It seems to work surprisingly well!
 
 ### Example
 
+- added new controlnet [animatediff-controlnet](https://www.reddit.com/r/StableDiffusion/comments/183gt1g/animation_with_animatediff_and_retrained/)
+- It works like ip2p and is very useful for replacing characters
+- (This sample is generated at high resolution using the gradual latent hires fix)
+- more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/189)
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/a867c480-3f1a-4e2c-874f-88c1a54e8903" muted="false"></video></div>
+<br>
+
+
 - gradual latent hires fix
 - sd15 512x856 / sd15 768x1280 / sd15 768x1280 with gradual latent hires fix
 - more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/188)
