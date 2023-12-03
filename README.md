@@ -10,7 +10,7 @@ It seems to work surprisingly well!
 
 - gradual latent hires fix
 - sd15 512x856 / sd15 768x1280 / sd15 768x1280 with gradual latent hires fix
-
+- more example [here](https://github.com/s9roll7/animatediff-cli-prompt-travel/issues/188)
 <div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/346c0541-7f05-4c45-ab2a-911bc0942fa8" muted="false"></video></div>
 <br>
 
