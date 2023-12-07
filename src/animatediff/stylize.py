@@ -303,7 +303,8 @@ def create_config(
         "controlnet_conditioning_scale": 1.0,
         "control_guidance_start": 0.0,
         "control_guidance_end": 1.0,
-        "control_scale_list":[]
+        "control_scale_list":[],
+        "control_region_list":[]
     }
 
 
@@ -314,7 +315,8 @@ def create_config(
       "controlnet_conditioning_scale": 0.5,
       "control_guidance_start": 0.0,
       "control_guidance_end": 1.0,
-      "control_scale_list":[]
+      "control_scale_list":[],
+      "control_region_list":[]
     }
 
     for m in model_config.controlnet_map:

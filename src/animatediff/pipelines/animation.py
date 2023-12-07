@@ -479,6 +479,26 @@ class RegionMask:
         ):
         return self.region_list[region_index]["mask_latents"]
 
+    def get_region_from_layer(
+            self,
+            cond_layer,
+            cond_nums,
+        ):
+        if self.multi_uncond_mode:
+            cond_layer = cond_layer if cond_layer < cond_nums//2 else cond_layer - cond_nums//2
+        else:
+            if cond_layer == 0:
+                return -1    #uncond for all layer
+
+            cond_layer -= 1
+
+        if cond_layer not in self.cond2region:
+            logger.warn(f"unknown {cond_layer=}")
+            return -1
+
+        return self.cond2region[cond_layer]
+
+
     def get_area(
             self,
             cond_layer,
@@ -2376,6 +2396,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         gradual_latent_map=None,
         **kwargs,
     ):
+        import gc
+
         global C_REF_MODE
 
         gradual_latent = False
@@ -2397,7 +2419,22 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         sequential_mode = video_length is not None and video_length > context_frames
 
         multi_uncond_mode = self.lora_map is not None
+
+        controlnet_for_region = False
+        for c in controlnet_type_map:
+            reg_list = controlnet_type_map[c]["control_region_list"]
+            if reg_list:
+                controlnet_for_region = True
+                break
+
+        if controlnet_for_region or multi_uncond_mode:
+            controlnet_for_region = True
+            multi_uncond_mode = True
+            unet_batch_size = 1
+
+        logger.info(f"{controlnet_for_region=}")
         logger.info(f"{multi_uncond_mode=}")
+        logger.info(f"{unet_batch_size=}")
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -2459,6 +2496,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             if multi_uncond_mode:
                 raise ValueError(f"controlnet_ref is not available in this configuration. {multi_uncond_mode=}")
 
+
+        logger.info(f"{prompt_encoder.get_condi_size()=}")
 
 
         # 3.5 Prepare controlnet variables
@@ -2622,6 +2661,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         del img2img_map
         torch.cuda.empty_cache()
+        gc.collect()
 
         # 5.5 Prepare region mask
         region_mask = RegionMask(
@@ -2735,6 +2775,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         prev_gradient_latent_size = gradual_latent_size(0)
 
 
+        shrink_controlnet = True
+
+
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=total_steps) as progress_bar:
@@ -2762,7 +2805,15 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 # { "0_type_str" : (down_samples, mid_sample)  }
                 controlnet_result={}
 
-                def get_controlnet_result(context: List[int] = None):
+                def scale_5d_tensor(ten, h, w, f):
+                    ten = rearrange(ten, "b c f h w -> (b f) c h w")
+                    ten = torch.nn.functional.interpolate(
+                            ten, size=(h, w), mode="bicubic", align_corners=False
+                        )
+                    return rearrange(ten, "(b f) c h w -> b c f h w", f=f)
+
+
+                def get_controlnet_result(context: List[int] = None, layer:int = -1):
                     #logger.info(f"get_controlnet_result called {context=}")
 
                     if controlnet_image_map is None:
@@ -2776,33 +2827,72 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     if hit == False:
                         return None, None
 
+
+                    def is_control_layer(type_str, layer):
+                        if layer == -1:
+                            return True
+                        region_list = controlnet_type_map[type_str]["control_region_list"]
+                        if not region_list:
+                            return True
+                        r = region_mask.get_region_from_layer(layer, prompt_encoder.get_condi_size())
+                        if r == -1:
+                            return False
+                        return r in region_list
+
+
+                    def to_device(sample, target_device):
+                        down_samples = [
+                            v.to(device = target_device, non_blocking=True) if v.device != target_device else v
+                            for v in sample[0] ]
+                        mid_sample = sample[1].to(device = target_device, non_blocking=True) if sample[1].device != target_device else sample[1]
+                        return (down_samples, mid_sample)
+
                     _down_block_res_samples=[]
 
                     first_down = list(list(controlnet_result.values())[0].values())[0][0]
                     first_mid = list(list(controlnet_result.values())[0].values())[0][1]
+
+                    shape0 = first_mid.shape[0] if layer == -1 else 1
                     for ii in range(len(first_down)):
                         _down_block_res_samples.append(
                             torch.zeros(
-                                (first_down[ii].shape[0], first_down[ii].shape[1], len(context) ,*first_down[ii].shape[3:]),
+                                (shape0, first_down[ii].shape[1], len(context) ,*first_down[ii].shape[3:]),
                                 device=device,
                                 dtype=first_down[ii].dtype,
                                 ))
                     _mid_block_res_samples =  torch.zeros(
-                                    (first_mid.shape[0], first_mid.shape[1], len(context) ,*first_mid.shape[3:]),
+                                    (shape0, first_mid.shape[1], len(context) ,*first_mid.shape[3:]),
                                     device=device,
                                     dtype=first_mid.dtype,
                                     )
 
+
+                    hit = False
+
                     for fr in controlnet_result:
                         for type_str in controlnet_result[fr]:
+                            if not is_control_layer(type_str, layer):
+                                continue
+
+                            hit = True
+
                             result = str(fr) + "_" + type_str
 
                             val = controlnet_result[fr][type_str]
-                            cur_down = [
-                                    v.to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v
-                                    for v in val[0]
-                                    ]
-                            cur_mid =val[1].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1]
+
+                            if layer == -1:
+                                cur_down = [
+                                        v.to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v
+                                        for v in val[0]
+                                        ]
+                                cur_mid =val[1].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1]
+                            else:
+                                cur_down = [
+                                        v[layer].to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v[layer]
+                                        for v in val[0]
+                                        ]
+                                cur_mid =val[1][layer].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1][layer]
+
                             loc =  list(set(context) & set(controlnet_scale_map[result]["frames"]))
                             scales = []
 
@@ -2828,6 +2918,24 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 add = cur_down[ii] * mod[None,None,:,None,None]
                                 _down_block_res_samples[ii][:, :, loc_index, :, :] = _down_block_res_samples[ii][:, :, loc_index, :, :] + add
 
+
+                    if not hit:
+                        return None, None
+
+                    if shrink_controlnet:
+                        cur_d_height, cur_d_width = _down_block_res_samples[0].shape[-2:]
+                        cur_lat_height, cur_lat_width = latents.shape[-2:]
+                        if cur_lat_height != cur_d_height:
+                            #logger.info(f"{cur_lat_height=} / {cur_d_height=}")
+                            for ii, rate in zip(range(len(_down_block_res_samples)), (1,1,1,2,2,2,4,4,4,8,8,8)):
+                                new_h = cur_lat_height // rate
+                                new_w = cur_lat_width // rate
+                                #logger.info(f"b {_down_block_res_samples[ii].shape=}")
+                                _down_block_res_samples[ii] = scale_5d_tensor(_down_block_res_samples[ii], new_h, new_w, context_frames)
+                                #logger.info(f"a {_down_block_res_samples[ii].shape=}")
+                            _mid_block_res_samples = scale_5d_tensor(_mid_block_res_samples, cur_lat_height // 8, cur_lat_width // 8, context_frames)
+
+
                     return _down_block_res_samples, _mid_block_res_samples
 
                 def process_controlnet( target_frames: List[int] = None ):
@@ -2849,10 +2957,13 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         nonlocal controlnet_samples_on_vram
 
                         if controlnet_max_samples_on_vram <= controlnet_samples_on_vram:
-                            down_samples = [
-                                v.to(device = torch.device("cpu"), non_blocking=True) if v.device != torch.device("cpu") else v
-                                for v in sample[0] ]
-                            mid_sample = sample[1].to(device = torch.device("cpu"), non_blocking=True) if sample[1].device != torch.device("cpu") else sample[1]
+                            if sample[0][0].device != torch.device("cpu"):
+                                down_samples = [ v.to(device = torch.device("cpu"), non_blocking=True) for v in sample[0] ]
+                                mid_sample = sample[1].to(device = torch.device("cpu"), non_blocking=True)
+                            else:
+                                down_samples = sample[0]
+                                mid_sample = sample[1]
+
                         else:
                             if sample[0][0].device != device:
                                 down_samples = [ v.to(device = device, non_blocking=True) for v in sample[0] ]
@@ -2860,6 +2971,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             else:
                                 down_samples = sample[0]
                                 mid_sample = sample[1]
+
                             controlnet_samples_on_vram += 1
                         return down_samples, mid_sample
 
@@ -2885,6 +2997,24 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 .to(device)
                                 .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
                             )
+
+                            if shrink_controlnet:
+                                cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
+                                cur = min(cur_lat_height, cur_lat_width)
+                                if cur > 64:    # 512 / 8 = 64
+                                    if cur_lat_height > cur_lat_width:
+                                        shr_lat_height = 64 * cur_lat_height / cur_lat_width
+                                        shr_lat_width = 64
+                                    else:
+                                        shr_lat_height = 64
+                                        shr_lat_width = 64 * cur_lat_width / cur_lat_height
+                                    shr_lat_height = int(shr_lat_height // 8 * 8)
+                                    shr_lat_width = int(shr_lat_width // 8 * 8)
+                                    #logger.info(f"b {latent_model_input.shape=}")
+                                    latent_model_input = scale_5d_tensor(latent_model_input, shr_lat_height, shr_lat_width, 1)
+                                    #logger.info(f"a {latent_model_input.shape=}")
+
+
                             control_model_input = self.scheduler.scale_model_input(latent_model_input, t)[:, :, 0]
                             controlnet_prompt_embeds = prompt_encoder.get_current_prompt_embeds([frame_no], latents.shape[2])
 
@@ -2926,7 +3056,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 cont_var_img = cont_var["image"].to(device=device)
 
                                 if gradual_latent:
-                                    cur_lat_height, cur_lat_width = latents.shape[-2:]
+                                    cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
                                     cont_var_img = torch.nn.functional.interpolate(
                                         cont_var_img.float(), size=(cur_lat_height*8, cur_lat_width*8), mode="bicubic", align_corners=False
                                     ).to(cont_var_img.dtype)
@@ -2985,7 +3115,11 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                     cur_prompt = prompt_encoder.get_current_prompt_embeds(context, latents.shape[2]).to(device=device)
 
-                    down_block_res_samples,mid_block_res_sample = get_controlnet_result(context)
+                    if controlnet_for_region:
+                        down_block_res_samples,mid_block_res_sample = (None,None)
+                    else:
+                        down_block_res_samples,mid_block_res_sample = get_controlnet_result(context)
+
 
                     if c_ref_enable:
                         # ref only part
@@ -3028,16 +3162,20 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         if self.lora_map:
                             self.lora_map.apply(layer_index, latent_model_input.shape[0], context[len(context)//2])
 
-                        __do = []
-                        if down_block_res_samples is not None:
-                            for do in down_block_res_samples:
-                                __do.append(do[layer_index:layer_index+unet_batch_size])
+                        if controlnet_for_region:
+                            __do,__mid = get_controlnet_result(context, layer_index)
                         else:
-                            __do = None
+                            __do = []
+                            if down_block_res_samples is not None:
+                                for do in down_block_res_samples:
+                                    __do.append(do[layer_index:layer_index+unet_batch_size])
+                            else:
+                                __do = None
 
-                        __mid = None
-                        if mid_block_res_sample is not None:
-                            __mid = mid_block_res_sample[layer_index:layer_index+unet_batch_size]
+                            __mid = None
+                            if mid_block_res_sample is not None:
+                                __mid = mid_block_res_sample[layer_index:layer_index+unet_batch_size]
+
 
                         __lat = latent_model_input[layer_index:layer_index+unet_batch_size]
                         __cur_prompt = cur_prompt[layer_index * context_frames:(layer_index + unet_batch_size)*context_frames]
@@ -3106,7 +3244,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                         __pred.append( pred_layer )
 
-
+                    __do = None
+                    __mid = None
                     down_block_res_samples = None
                     mid_block_res_sample = None
 
@@ -3214,6 +3353,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             )
                         i -= reverse
                         torch.cuda.empty_cache()
+                        gc.collect()
 
                 prev_gradient_latent_size = cur_gradient_latent_size
 
@@ -3221,6 +3361,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         controlnet_result = None
         torch.cuda.empty_cache()
+        gc.collect()
 
         if c_ref_enable:
             self.unload_controlnet_ref_only(

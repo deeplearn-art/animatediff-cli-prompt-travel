@@ -191,7 +191,7 @@ def generate(
             "-C",
             min=1,
             max=32,
-            help="Number of frames to condition on (default: 16",
+            help="Number of frames to condition on (default: 16)",
             show_default=False,
             rich_help_panel="Generation",
         ),
@@ -402,7 +402,12 @@ def generate(
     wild_card_conversion(model_config)
 
     is_init_img_exist = img2img_map != None
-    region_condi_list, region_list, ip_adapter_config_map = region_preprocess(model_config, width, height, length, save_dir, is_init_img_exist, is_sdxl)
+    region_condi_list, region_list, ip_adapter_config_map, region2index = region_preprocess(model_config, width, height, length, save_dir, is_init_img_exist, is_sdxl)
+
+    for c in controlnet_type_map:
+        tmp_r = [region2index[r] for r in controlnet_type_map[c]["control_region_list"]]
+        controlnet_type_map[c]["control_region_list"] = [r for r in tmp_r if r != -1]
+        logger.info(f"{c=} / {controlnet_type_map[c]['control_region_list']}")
 
     # save config to output directory
     logger.info("Saving prompt config to output directory")
@@ -965,11 +970,11 @@ def refine(
             "-C",
             min=1,
             max=32,
-            help="Number of frames to condition on (default: max of <length> or 32). max for motion module v1 is 24",
+            help="Number of frames to condition on (default: 16)",
             show_default=False,
             rich_help_panel="Generation",
         ),
-    ] = None,
+    ] = 16,
     overlap: Annotated[
         Optional[int],
         typer.Option(
