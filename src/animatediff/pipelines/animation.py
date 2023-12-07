@@ -2812,7 +2812,6 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         )
                     return rearrange(ten, "(b f) c h w -> b c f h w", f=f)
 
-
                 def get_controlnet_result(context: List[int] = None, layer:int = -1):
                     #logger.info(f"get_controlnet_result called {context=}")
 
@@ -2867,7 +2866,56 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                     )
 
 
+                    def merge_result(fr, type_str):
+                        nonlocal _mid_block_res_samples, _down_block_res_samples
+                        result = str(fr) + "_" + type_str
+
+                        val = controlnet_result[fr][type_str]
+
+                        if layer == -1:
+                            cur_down = [
+                                    v.to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v
+                                    for v in val[0]
+                                    ]
+                            cur_mid =val[1].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1]
+                        else:
+                            cur_down = [
+                                    v[layer].to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v[layer]
+                                    for v in val[0]
+                                    ]
+                            cur_mid =val[1][layer].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1][layer]
+
+                        loc =  list(set(context) & set(controlnet_scale_map[result]["frames"]))
+                        scales = []
+
+                        for o in loc:
+                            for j, f in enumerate(controlnet_scale_map[result]["frames"]):
+                                if o == f:
+                                    scales.append(controlnet_scale_map[result]["scales"][j])
+                                    break
+                        loc_index=[]
+
+                        for o in loc:
+                            for j, f in enumerate( context ):
+                                if o==f:
+                                    loc_index.append(j)
+                                    break
+
+                        mod = torch.tensor(scales).to(device, dtype=cur_mid.dtype)
+
+                        add = cur_mid * mod[None,None,:,None,None]
+                        _mid_block_res_samples[:, :, loc_index, :, :] = _mid_block_res_samples[:, :, loc_index, :, :] + add
+
+                        for ii in range(len(cur_down)):
+                            add = cur_down[ii] * mod[None,None,:,None,None]
+                            _down_block_res_samples[ii][:, :, loc_index, :, :] = _down_block_res_samples[ii][:, :, loc_index, :, :] + add
+
+
+
+
                     hit = False
+
+                    no_shrink_list = []
 
                     for fr in controlnet_result:
                         for type_str in controlnet_result[fr]:
@@ -2876,65 +2924,34 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                             hit = True
 
-                            result = str(fr) + "_" + type_str
+                            if shrink_controlnet and (type_str in ("controlnet_tile")):
+                                no_shrink_list.append(type_str)
+                                continue
 
-                            val = controlnet_result[fr][type_str]
+                            merge_result(fr, type_str)
 
-                            if layer == -1:
-                                cur_down = [
-                                        v.to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v
-                                        for v in val[0]
-                                        ]
-                                cur_mid =val[1].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1]
-                            else:
-                                cur_down = [
-                                        v[layer].to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v[layer]
-                                        for v in val[0]
-                                        ]
-                                cur_mid =val[1][layer].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1][layer]
+                    cur_d_height, cur_d_width = _down_block_res_samples[0].shape[-2:]
+                    cur_lat_height, cur_lat_width = latents.shape[-2:]
+                    if cur_lat_height != cur_d_height:
+                        #logger.info(f"{cur_lat_height=} / {cur_d_height=}")
+                        for ii, rate in zip(range(len(_down_block_res_samples)), (1,1,1,2,2,2,4,4,4,8,8,8)):
+                            new_h = cur_lat_height // rate
+                            new_w = cur_lat_width // rate
+                            #logger.info(f"b {_down_block_res_samples[ii].shape=}")
+                            _down_block_res_samples[ii] = scale_5d_tensor(_down_block_res_samples[ii], new_h, new_w, context_frames)
+                            #logger.info(f"a {_down_block_res_samples[ii].shape=}")
+                        _mid_block_res_samples = scale_5d_tensor(_mid_block_res_samples, cur_lat_height // 8, cur_lat_width // 8, context_frames)
 
-                            loc =  list(set(context) & set(controlnet_scale_map[result]["frames"]))
-                            scales = []
 
-                            for o in loc:
-                                for j, f in enumerate(controlnet_scale_map[result]["frames"]):
-                                    if o == f:
-                                        scales.append(controlnet_scale_map[result]["scales"][j])
-                                        break
-                            loc_index=[]
-
-                            for o in loc:
-                                for j, f in enumerate( context ):
-                                    if o==f:
-                                        loc_index.append(j)
-                                        break
-
-                            mod = torch.tensor(scales).to(device, dtype=cur_mid.dtype)
-
-                            add = cur_mid * mod[None,None,:,None,None]
-                            _mid_block_res_samples[:, :, loc_index, :, :] = _mid_block_res_samples[:, :, loc_index, :, :] + add
-
-                            for ii in range(len(cur_down)):
-                                add = cur_down[ii] * mod[None,None,:,None,None]
-                                _down_block_res_samples[ii][:, :, loc_index, :, :] = _down_block_res_samples[ii][:, :, loc_index, :, :] + add
+                    for fr in controlnet_result:
+                        for type_str in controlnet_result[fr]:
+                            if type_str not in no_shrink_list:
+                                continue
+                            merge_result(fr, type_str)
 
 
                     if not hit:
                         return None, None
-
-                    if shrink_controlnet:
-                        cur_d_height, cur_d_width = _down_block_res_samples[0].shape[-2:]
-                        cur_lat_height, cur_lat_width = latents.shape[-2:]
-                        if cur_lat_height != cur_d_height:
-                            #logger.info(f"{cur_lat_height=} / {cur_d_height=}")
-                            for ii, rate in zip(range(len(_down_block_res_samples)), (1,1,1,2,2,2,4,4,4,8,8,8)):
-                                new_h = cur_lat_height // rate
-                                new_w = cur_lat_width // rate
-                                #logger.info(f"b {_down_block_res_samples[ii].shape=}")
-                                _down_block_res_samples[ii] = scale_5d_tensor(_down_block_res_samples[ii], new_h, new_w, context_frames)
-                                #logger.info(f"a {_down_block_res_samples[ii].shape=}")
-                            _mid_block_res_samples = scale_5d_tensor(_mid_block_res_samples, cur_lat_height // 8, cur_lat_width // 8, context_frames)
-
 
                     return _down_block_res_samples, _mid_block_res_samples
 
@@ -2998,7 +3015,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
                             )
 
-                            if shrink_controlnet:
+                            if shrink_controlnet and (type_str != "controlnet_tile"):
                                 cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
                                 cur = min(cur_lat_height, cur_lat_width)
                                 if cur > 64:    # 512 / 8 = 64
@@ -3055,8 +3072,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             else:
                                 cont_var_img = cont_var["image"].to(device=device)
 
-                                if gradual_latent:
-                                    cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
+                                cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
+                                cur_img_height, cur_img_width = cont_var_img.shape[-2:]
+                                if (cur_lat_height*8 != cur_img_height) or (cur_lat_width*8 != cur_img_width):
                                     cont_var_img = torch.nn.functional.interpolate(
                                         cont_var_img.float(), size=(cur_lat_height*8, cur_lat_width*8), mode="bicubic", align_corners=False
                                     ).to(cont_var_img.dtype)
