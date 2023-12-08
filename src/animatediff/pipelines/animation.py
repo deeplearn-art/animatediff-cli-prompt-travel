@@ -2739,8 +2739,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         def gradual_latent_size(progress):
             if gradual_latent:
                 current_ratio = gradual_latent_scale(progress)
-                h = int(lat_height * current_ratio) // 8 * 8
-                w = int(lat_width * current_ratio) // 8 * 8
+                h = int(lat_height * current_ratio)
+                w = int(lat_width * current_ratio)
                 return (h,w)
             else:
                 return (lat_height, lat_width)
@@ -2935,12 +2935,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     if cur_lat_height != cur_d_height:
                         #logger.info(f"{cur_lat_height=} / {cur_d_height=}")
                         for ii, rate in zip(range(len(_down_block_res_samples)), (1,1,1,2,2,2,4,4,4,8,8,8)):
-                            new_h = cur_lat_height // rate
-                            new_w = cur_lat_width // rate
+                            new_h = (cur_lat_height + rate-1) // rate
+                            new_w = (cur_lat_width + rate-1) // rate
                             #logger.info(f"b {_down_block_res_samples[ii].shape=}")
                             _down_block_res_samples[ii] = scale_5d_tensor(_down_block_res_samples[ii], new_h, new_w, context_frames)
                             #logger.info(f"a {_down_block_res_samples[ii].shape=}")
-                        _mid_block_res_samples = scale_5d_tensor(_mid_block_res_samples, cur_lat_height // 8, cur_lat_width // 8, context_frames)
+                        _mid_block_res_samples = scale_5d_tensor(_mid_block_res_samples, (cur_lat_height + rate - 1)// 8, (cur_lat_width + rate - 1)// 8, context_frames)
 
 
                     for fr in controlnet_result:
@@ -3015,7 +3015,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
                             )
 
-                            if shrink_controlnet and (type_str != "controlnet_tile"):
+                            if shrink_controlnet and (type_str not in ("controlnet_tile")):
                                 cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
                                 cur = min(cur_lat_height, cur_lat_width)
                                 if cur > 64:    # 512 / 8 = 64
@@ -3229,7 +3229,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                         _inner_do_list = []
                                         for c_index, xy in enumerate( xy_list ):
                                             a_x, a_y = xy
-                                            _inner_do_list.append(_d[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+                                            _inner_do_list.append(_d[:,:,[c_index],(a_y + rate-1)//rate:((a_y+a_h)+ rate-1)//rate, (a_x+ rate-1)//rate:((a_x+a_w)+ rate-1)//rate ] )
 
                                         __tmp_do.append( torch.cat(_inner_do_list, dim=2) )
                                     __do = __tmp_do
@@ -3239,7 +3239,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                     _mid_list = []
                                     for c_index, xy in enumerate( xy_list ):
                                         a_x, a_y = xy
-                                        _mid_list.append( __mid[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+                                        _mid_list.append( __mid[:,:,[c_index],(a_y+ rate-1)//rate:((a_y+a_h)+ rate-1)//rate, (a_x+ rate-1)//rate:((a_x+a_w)+ rate-1)//rate ] )
                                     __mid = torch.cat(_mid_list, dim=2)
 
                             stopwatch_record("crop self.unet start")
