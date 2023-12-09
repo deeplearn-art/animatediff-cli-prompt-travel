@@ -2778,6 +2778,9 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         shrink_controlnet = True
         no_shrink_type = ["controlnet_tile"]
 
+        for nt in no_shrink_type:
+            controlnet_type_map[nt] = controlnet_type_map.pop(nt)
+
         def need_region_blend(cur_step, total_steps):
             if cur_step + 1 == total_steps:
                 return True
@@ -2909,6 +2912,14 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                     break
 
                         mod = torch.tensor(scales).to(device, dtype=cur_mid.dtype)
+
+                        '''
+                        for ii in range(len(_down_block_res_samples)):
+                            logger.info(f"{type_str=} / {cur_down[ii].shape=}")
+                            logger.info(f"{type_str=} / {_down_block_res_samples[ii].shape=}")
+                        logger.info(f"{type_str=} / {cur_mid.shape=}")
+                        logger.info(f"{type_str=} / {_mid_block_res_samples.shape=}")
+                        '''
 
                         add = cur_mid * mod[None,None,:,None,None]
                         _mid_block_res_samples[:, :, loc_index, :, :] = _mid_block_res_samples[:, :, loc_index, :, :] + add
@@ -3108,6 +3119,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                             if frame_no not in controlnet_result:
                                 controlnet_result[frame_no] = {}
+
+                            '''
+                            for ii in range(len(down_samples)):
+                                logger.info(f"{type_str=} / {down_samples[ii].shape=}")
+                            logger.info(f"{type_str=} / {mid_sample.shape=}")
+                            '''
 
                             controlnet_result[frame_no][type_str] = sample_to_device((down_samples, mid_sample))
 
