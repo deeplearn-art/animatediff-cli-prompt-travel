@@ -974,17 +974,19 @@ def ip_adapter_preprocess(
         out_dir: PathLike = ...,
         is_sdxl: bool = False,
         ):
-
+    logger.debug("Ip adapter precprocessing...")
     ip_adapter_map={}
 
     processed = False
 
     if ip_adapter_config_map:
         if ip_adapter_config_map["enable"] == True:
+            logger.debug("Ip adapter enabled.")
             resized_to_square = ip_adapter_config_map["resized_to_square"] if "resized_to_square" in ip_adapter_config_map else False
             image_dir = data_dir.joinpath( ip_adapter_config_map["input_image_dir"] )
             imgs = sorted(chain.from_iterable([glob.glob(os.path.join(image_dir, f"[0-9]*{ext}")) for ext in IMG_EXTENSIONS]))
             if len(imgs) > 0:
+                logger.debug(f"Found {len(imgs)} in {image_dir}")
                 prepare_ip_adapter_sdxl() if is_sdxl else prepare_ip_adapter()
                 ip_adapter_map["images"] = {}
                 for img_path in tqdm(imgs, desc=f"Preprocessing images (ip_adapter)"):
@@ -1059,9 +1061,10 @@ def region_preprocess(
         is_init_img_exist: bool = False,
         is_sdxl:bool = False,
         ):
-
+    logger.debug("Region preprocessing...")
     is_bg_init_img = False
     if is_init_img_exist:
+        logger.debug("Is init image")
         if model_config.region_map:
             if "background" in model_config.region_map:
                 is_bg_init_img = model_config.region_map["background"]["is_init_img"]
@@ -1211,11 +1214,12 @@ def img2img_preprocess(
     img2img_map={}
 
     processed = False
-
+    logger.debug("Preprocessing img2img")
     if img2img_config_map:
         if img2img_config_map["enable"] == True:
             image_dir = data_dir.joinpath( img2img_config_map["init_img_dir"] )
             imgs = sorted(glob.glob( os.path.join(image_dir, "[0-9]*.png"), recursive=False))
+            logger.debug(f"Found {len(imgs)} in {image_dir}")
             if len(imgs) > 0:
                 img2img_map["images"] = {}
                 img2img_map["denoising_strength"] = img2img_config_map["denoising_strength"]

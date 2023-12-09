@@ -227,7 +227,7 @@ def stopwatch_stop(comment):
 def prepare_ip_adapter():
     import os
     from pathlib import PurePosixPath
-
+    logger.debug("Preparing ip adapter")
     from huggingface_hub import hf_hub_download
 
     os.makedirs("data/models/ip_adapter/models/image_encoder", exist_ok=True)
@@ -245,8 +245,9 @@ def prepare_ip_adapter():
         saved_path = "data/models/ip_adapter" / path
 
         if os.path.exists(saved_path):
+            logger.debug(f"Found {saved_path} ")
             continue
-
+        logger.debug(f"Downloading {saved_path} ")
         hf_hub_download(
             repo_id="h94/IP-Adapter", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/ip_adapter"
         )
