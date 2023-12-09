@@ -2776,7 +2776,14 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
 
         shrink_controlnet = True
+        no_shrink_type = ["controlnet_tile"]
 
+        def need_region_blend(cur_step, total_steps):
+            if cur_step + 1 == total_steps:
+                return True
+            if multi_uncond_mode == False:
+                return True
+            return cur_step % 2 == 1
 
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -2794,7 +2801,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     self.lcm.apply(i, len(timesteps))
 
                 noise_pred = torch.zeros(
-                    (latents.shape[0] * prompt_encoder.get_condi_size(), *latents.shape[1:]),
+                    (prompt_encoder.get_condi_size(), *latents.shape[1:]),
                     device=latents.device,
                     dtype=latents.dtype,
                 )
@@ -2924,7 +2931,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                             hit = True
 
-                            if shrink_controlnet and (type_str in ("controlnet_tile")):
+                            if shrink_controlnet and (type_str in no_shrink_type):
                                 no_shrink_list.append(type_str)
                                 continue
 
@@ -3009,13 +3016,19 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         for cont_var in cont_vars:
                             frame_no = cont_var["frame_no"]
 
-                            latent_model_input = (
-                                latents[:, :, [frame_no]]
-                                .to(device)
-                                .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
-                            )
+                            if latents.shape[0] == 1:
+                                latent_model_input = (
+                                    latents[:, :, [frame_no]]
+                                    .to(device)
+                                    .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
+                                )
+                            else:
+                                latent_model_input=[]
+                                for s0_index in list(range(latents.shape[0])) + list(range(latents.shape[0])):
+                                    latent_model_input.append( latents[[s0_index], :, [frame_no]].to(device).unsqueeze(dim=2) )
+                                latent_model_input = torch.cat(latent_model_input)
 
-                            if shrink_controlnet and (type_str not in ("controlnet_tile")):
+                            if shrink_controlnet and (type_str not in no_shrink_type):
                                 cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
                                 cur = min(cur_lat_height, cur_lat_width)
                                 if cur > 64:    # 512 / 8 = 64
@@ -3123,12 +3136,20 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                         process_controlnet(controlnet_target)
 
-                    # expand the latents if we are doing classifier free guidance
-                    latent_model_input = (
-                        latents[:, :, context]
-                        .to(device)
-                        .repeat(prompt_encoder.get_condi_size(), 1, 1, 1, 1)
-                    )
+                    # expand the latents
+                    if latents.shape[0] == 1:
+                        latent_model_input = (
+                            latents[:, :, context]
+                            .to(device)
+                            .repeat(prompt_encoder.get_condi_size(), 1, 1, 1, 1)
+                        )
+                    else:
+                        latent_model_input=[]
+                        for s0_index in list(range(latents.shape[0])) + list(range(latents.shape[0])):
+                            latent_model_input.append( latents[s0_index:s0_index+1, :, context].to(device) )
+                        latent_model_input = torch.cat(latent_model_input)
+
+
                     latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                     cur_prompt = prompt_encoder.get_current_prompt_embeds(context, latents.shape[2]).to(device=device)
@@ -3320,37 +3341,38 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     return_dict=False,
                 )[0]
 
-                latents_list = latents.chunk( noise_size )
+                if need_region_blend(i, len(timesteps)):
+                    latents_list = latents.chunk( noise_size )
 
-                tmp_latent = torch.zeros(
-                    latents_list[0].shape, device=latents.device, dtype=latents.dtype
-                )
+                    tmp_latent = torch.zeros(
+                        latents_list[0].shape, device=latents.device, dtype=latents.dtype
+                    )
 
-                for r_no in range(len(region_list)):
-                    mask = region_mask.get_mask( r_no )
-                    if gradual_latent:
-                        mask = resize_tensor(mask, cur_gradient_latent_size)
-                    src = region_list[r_no]["src"]
-                    if src == -1:
-                        init_latents_proper = image_latents[:1]
-
-                        if i < len(timesteps) - 1:
-                            noise_timestep = timesteps[i + 1]
-                            init_latents_proper = self.scheduler.add_noise(
-                                init_latents_proper, noise, torch.tensor([noise_timestep])
-                            )
-
+                    for r_no in range(len(region_list)):
+                        mask = region_mask.get_mask( r_no )
                         if gradual_latent:
-                            lat = resize_tensor(init_latents_proper, cur_gradient_latent_size)
+                            mask = resize_tensor(mask, cur_gradient_latent_size)
+                        src = region_list[r_no]["src"]
+                        if src == -1:
+                            init_latents_proper = image_latents[:1]
+
+                            if i < len(timesteps) - 1:
+                                noise_timestep = timesteps[i + 1]
+                                init_latents_proper = self.scheduler.add_noise(
+                                    init_latents_proper, noise, torch.tensor([noise_timestep])
+                                )
+
+                            if gradual_latent:
+                                lat = resize_tensor(init_latents_proper, cur_gradient_latent_size)
+                            else:
+                                lat = init_latents_proper
+
                         else:
-                            lat = init_latents_proper
+                            lat = latents_list[src]
 
-                    else:
-                        lat = latents_list[src]
+                        tmp_latent = tmp_latent * (1-mask) + lat * mask
 
-                    tmp_latent = tmp_latent * (1-mask) + lat * mask
-
-                latents = tmp_latent
+                    latents = tmp_latent
 
                 init_latents_proper = None
                 lat = None
