@@ -249,7 +249,11 @@ def prepare_ip_adapter():
             continue
         logger.debug(f"Downloading {saved_path} ")
         hf_hub_download(
-            repo_id="h94/IP-Adapter", subfolder=PurePosixPath(path.parent), filename=PurePosixPath(path.name), local_dir="data/models/ip_adapter"
+            repo_id="h94/IP-Adapter",
+            subfolder=PurePosixPath(path.parent),
+            filename=PurePosixPath(path.name),
+            local_dir="data/models/ip_adapter",
+            local_dir_use_symlinks=False
         )
 
 def prepare_ip_adapter_sdxl():
