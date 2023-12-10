@@ -8,6 +8,13 @@ It seems to work surprisingly well!
 
 ### Example
 
+- controlnet for region
+- controlnet_openpose for fg
+- controlnet_tile(0.7) for bg
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/09fbf348-42ed-425c-9ec0-2865d233203a" muted="false"></video></div>
+<br>
+
+
 - added new controlnet [animatediff-controlnet](https://www.reddit.com/r/StableDiffusion/comments/183gt1g/animation_with_animatediff_and_retrained/)
 - It works like ip2p and is very useful for replacing characters
 - (This sample is generated at high resolution using the gradual latent hires fix)
