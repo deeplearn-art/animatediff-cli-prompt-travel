@@ -2421,11 +2421,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         multi_uncond_mode = self.lora_map is not None
 
         controlnet_for_region = False
-        for c in controlnet_type_map:
-            reg_list = controlnet_type_map[c]["control_region_list"]
-            if reg_list:
-                controlnet_for_region = True
-                break
+        if controlnet_type_map:
+            for c in controlnet_type_map:
+                reg_list = controlnet_type_map[c]["control_region_list"]
+                if reg_list:
+                    controlnet_for_region = True
+                    break
 
         if controlnet_for_region or multi_uncond_mode:
             controlnet_for_region = True
@@ -2778,8 +2779,10 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         shrink_controlnet = True
         no_shrink_type = ["controlnet_tile"]
 
-        for nt in no_shrink_type:
-            controlnet_type_map[nt] = controlnet_type_map.pop(nt)
+        if controlnet_type_map:
+            for nt in no_shrink_type:
+                if nt in controlnet_type_map:
+                    controlnet_type_map[nt] = controlnet_type_map.pop(nt)
 
         def need_region_blend(cur_step, total_steps):
             if cur_step + 1 == total_steps:

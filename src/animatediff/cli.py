@@ -404,10 +404,11 @@ def generate(
     is_init_img_exist = img2img_map != None
     region_condi_list, region_list, ip_adapter_config_map, region2index = region_preprocess(model_config, width, height, length, save_dir, is_init_img_exist, is_sdxl)
 
-    for c in controlnet_type_map:
-        tmp_r = [region2index[r] for r in controlnet_type_map[c]["control_region_list"]]
-        controlnet_type_map[c]["control_region_list"] = [r for r in tmp_r if r != -1]
-        logger.info(f"{c=} / {controlnet_type_map[c]['control_region_list']}")
+    if controlnet_type_map:
+        for c in controlnet_type_map:
+            tmp_r = [region2index[r] for r in controlnet_type_map[c]["control_region_list"]]
+            controlnet_type_map[c]["control_region_list"] = [r for r in tmp_r if r != -1]
+            logger.info(f"{c=} / {controlnet_type_map[c]['control_region_list']}")
 
     # save config to output directory
     logger.info("Saving prompt config to output directory")
