@@ -1,6 +1,7 @@
 {
   "name": "sample",
   "path": "share/Stable-diffusion/mistoonAnime_v20.safetensors",
+  "context_schedule" : "uniform",
   "lcm_map":{
     "enable":false,
     "start_scale":0.15,
