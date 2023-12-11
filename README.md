@@ -8,6 +8,18 @@ It seems to work surprisingly well!
 
 ### Example
 
+- context_schedule "composite"
+- pros : more stable animation
+- cons : ignore prompts that require compositional changes
+- "uniform"(default) / "composite"
+
+<div><video controls src="https://github.com/s9roll7/animatediff-cli-prompt-travel/assets/118420657/717536f1-7c60-49a6-ad3a-de31d6b3efd9" muted="false"></video></div>
+<br>
+
+
+
+
+
 - controlnet for region
 - controlnet_openpose for fg
 - controlnet_tile(0.7) for bg
@@ -104,6 +116,7 @@ Almost same as the original animatediff-cli, but with a slight change in config 
   },
   "vae_path":"share/VAE/vae-ft-mse-840000-ema-pruned.ckpt",       # Specify vae as a path relative to /animatediff-cli/data
   "motion_module": "models/motion-module/mm_sd_v14.ckpt",         # Specify motion module as a path relative to /animatediff-cli/data
+  "context_schedule":"uniform",          # "uniform" or "composite"
   "compile": false,
   "seed": [
     341774366206100,-1,-1         # -1 means random. If "--repeats 3" is specified in this setting, The first will be 341774366206100, the second and third will be random.
