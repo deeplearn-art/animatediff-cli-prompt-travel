@@ -2383,6 +2383,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         controlnet_type_map: Dict[str, Dict[str,float]] = None,
         controlnet_image_map: Dict[int, Dict[str,Any]] = None,
         controlnet_ref_map: Dict[str, Any] = None,
+        controlnet_no_shrink:List[str]=None,
         controlnet_max_samples_on_vram: int = 999,
         controlnet_max_models_on_vram: int=99,
         controlnet_is_loop: bool=True,
@@ -2777,7 +2778,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
 
         shrink_controlnet = True
-        no_shrink_type = ["controlnet_tile"]
+        no_shrink_type = controlnet_no_shrink
 
         if controlnet_type_map:
             for nt in no_shrink_type:

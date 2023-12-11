@@ -347,7 +347,7 @@ def generate(
     save_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Will save outputs to ./{path_from_cwd(save_dir)}")
 
-    controlnet_image_map, controlnet_type_map, controlnet_ref_map = controlnet_preprocess(model_config.controlnet_map, width, height, length, save_dir, device, is_sdxl)
+    controlnet_image_map, controlnet_type_map, controlnet_ref_map, controlnet_no_shrink = controlnet_preprocess(model_config.controlnet_map, width, height, length, save_dir, device, is_sdxl)
     img2img_map = img2img_preprocess(model_config.img2img_map, width, height, length, save_dir)
 
     # beware the pipeline
@@ -451,6 +451,7 @@ def generate(
                 duration=length,
                 idx=gen_num,
                 out_dir=save_dir,
+                context_schedule=model_config.context_schedule,
                 context_frames=context,
                 context_overlap=overlap,
                 context_stride=stride,
@@ -459,6 +460,7 @@ def generate(
                 controlnet_image_map=controlnet_image_map,
                 controlnet_type_map=controlnet_type_map,
                 controlnet_ref_map=controlnet_ref_map,
+                controlnet_no_shrink=controlnet_no_shrink,
                 no_frames=no_frames,
                 img2img_map=img2img_map,
                 ip_adapter_config_map=ip_adapter_config_map,

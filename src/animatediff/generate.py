@@ -947,7 +947,7 @@ def controlnet_preprocess(
         ):
 
     if not controlnet_map:
-        return None, None, None
+        return None, None, None, None
 
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 
@@ -1040,8 +1040,11 @@ def controlnet_preprocess(
                     save_path = det_dir.joinpath(f"{org_name}.png")
                     ref_image.save(save_path)
 
+    controlnet_no_shrink = ["controlnet_tile","animatediff_controlnet","controlnet_canny","controlnet_depth","controlnet_lineart","controlnet_lineart_anime","controlnet_scribble","controlnet_seg","controlnet_softedge","controlnet_mlsd"]
+    if "no_shrink_list" in controlnet_map:
+        controlnet_no_shrink = controlnet_map["no_shrink_list"]
 
-    return controlnet_image_map, controlnet_type_map, controlnet_ref_map
+    return controlnet_image_map, controlnet_type_map, controlnet_ref_map, controlnet_no_shrink
 
 
 def ip_adapter_preprocess(
@@ -1474,6 +1477,7 @@ def run_inference(
     controlnet_image_map: Dict[str,Any] = None,
     controlnet_type_map: Dict[str,Any] = None,
     controlnet_ref_map: Dict[str,Any] = None,
+    controlnet_no_shrink:List[str]=None,
     no_frames :bool = False,
     img2img_map: Dict[str,Any] = None,
     ip_adapter_config_map: Dict[str,Any] = None,
@@ -1529,6 +1533,7 @@ def run_inference(
         controlnet_type_map=controlnet_type_map,
         controlnet_image_map=controlnet_image_map,
         controlnet_ref_map=controlnet_ref_map,
+        controlnet_no_shrink=controlnet_no_shrink,
         controlnet_max_samples_on_vram=controlnet_map["max_samples_on_vram"] if "max_samples_on_vram" in controlnet_map else 999,
         controlnet_max_models_on_vram=controlnet_map["max_models_on_vram"] if "max_models_on_vram" in controlnet_map else 99,
         controlnet_is_loop = controlnet_map["is_loop"] if "is_loop" in controlnet_map else True,
