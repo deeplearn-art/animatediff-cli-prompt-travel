@@ -884,7 +884,7 @@ def controlnet_preprocess(
 
     preprocess_on_gpu = controlnet_map["preprocess_on_gpu"] if "preprocess_on_gpu" in controlnet_map else True
     device_str = device_str if preprocess_on_gpu else None
-
+    logger.debug(f"controlnet device_str : {device_str}")
     for c in controlnet_map:
         if c == "controlnet_ref":
             continue
