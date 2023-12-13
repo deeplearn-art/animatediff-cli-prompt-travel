@@ -70,6 +70,7 @@ def fix_checkpoint_if_needed(checkpoint: Path, debug:bool):
             pretrained_model_link_or_path=str(checkpoint.absolute()),
             local_files_only=True,
             load_safety_checker=False,
+            original_config_file="../../config/v1-inference.yaml"
         )
         logger.info("This file works fine.")
         return
@@ -131,6 +132,7 @@ def checkpoint_to_pipeline(
         pretrained_model_link_or_path=str(checkpoint.absolute()),
         local_files_only=True,
         load_safety_checker=False,
+        original_config_file="../../config/v1-inference.yaml"
     )
 
     if save:

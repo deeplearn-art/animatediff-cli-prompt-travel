@@ -780,7 +780,10 @@ def create_us_pipeline(
                 # StableDiffusionControlNetImg2ImgPipeline.from_single_file does not exist in version 18.2
                 logger.debug("Loading from single checkpoint file")
                 tmp_pipeline = StableDiffusionPipeline.from_single_file(
-                    pretrained_model_link_or_path=str(model_path.absolute())
+                    pretrained_model_link_or_path=str(model_path.absolute()),
+                    local_files_only=True,
+                    original_config_file="../config/v1-inference.yaml",
+                    load_safety_checker=False
                 )
                 tmp_pipeline.save_pretrained(save_path, safe_serialization=True)
                 del tmp_pipeline
