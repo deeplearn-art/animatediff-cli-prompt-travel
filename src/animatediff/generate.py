@@ -782,7 +782,7 @@ def create_us_pipeline(
                 tmp_pipeline = StableDiffusionPipeline.from_single_file(
                     pretrained_model_link_or_path=str(model_path.absolute()),
                     local_files_only=True,
-                    original_config_file="./v1-inference.yaml",
+                    original_config_file="v1-inference.yaml",
                     load_safety_checker=False
                 )
                 tmp_pipeline.save_pretrained(save_path, safe_serialization=True)
