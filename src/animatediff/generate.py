@@ -333,6 +333,7 @@ default_preprocessor_table={
 }
 
 def create_preprocessor_from_name(pre_type):
+    logger.debug(f"preprocessor type :{pre_type}")
     if pre_type == "dwpose":
         prepare_dwpose()
         return DWposeDetector()
@@ -361,18 +362,25 @@ def create_default_preprocessor(type_str):
 
 def get_preprocessor(type_str, device_str, preprocessor_map):
     if type_str not in controlnet_preprocessor:
+        logger.debug("type_str not in controlnet_preprocessor")
         if preprocessor_map:
+            logger.debug("create preprocessor from name")
             controlnet_preprocessor[type_str] = create_preprocessor_from_name(preprocessor_map["type"])
 
         if type_str not in controlnet_preprocessor:
+            logger.debug("create default preprocessor")
             controlnet_preprocessor[type_str] = create_default_preprocessor(type_str)
 
         if hasattr(controlnet_preprocessor[type_str], "processor"):
+            logger.debug('hasattr(controlnet_preprocessor[type_str], "processor"')
             if hasattr(controlnet_preprocessor[type_str].processor, "to"):
+                logger.debug('hasattr(controlnet_preprocessor[type_str].processor, "to"')
                 if device_str:
+                    logger.debug('... and controlnet_preprocessor[type_str].processor.to(device_str)')
                     controlnet_preprocessor[type_str].processor.to(device_str)
         elif hasattr(controlnet_preprocessor[type_str], "to"):
             if device_str:
+                logger.debug('controlnet_preprocessor[type_str].processor.to(device_str)')
                 controlnet_preprocessor[type_str].to(device_str)
 
 
