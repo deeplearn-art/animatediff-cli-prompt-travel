@@ -28,14 +28,14 @@ from transformers import (AutoImageProcessor, CLIPImageProcessor,
                           UperNetForSemanticSegmentation)
 
 from animatediff import get_dir
-
+from animatediff.dwpose import DWposeDetector
 from animatediff.models.clip import CLIPSkipTextModel
 from animatediff.models.unet import UNet3DConditionModel
 from animatediff.pipelines import AnimationPipeline, load_text_embeddings
 from animatediff.pipelines.lora import load_lcm_lora, load_lora_map
 from animatediff.pipelines.pipeline_controlnet_img2img_reference import \
     StableDiffusionControlNetImg2ImgReferencePipeline
-from animatediff.schedulers import get_scheduler
+from animatediff.schedulers import DiffusionScheduler, get_scheduler
 from animatediff.settings import InferenceConfig, ModelConfig
 from animatediff.utils.control_net_lllite import (ControlNetLLLite,
                                                   load_controlnet_lllite)
@@ -47,7 +47,8 @@ from animatediff.utils.model import (ensure_motion_modules,
 from animatediff.utils.util import (get_resized_image, get_resized_image2,
                                     get_resized_images,
                                     get_tensor_interpolation_method,
-                                    prepare_dwpose, prepare_ip_adapter,
+                                    prepare_dwpose, prepare_extra_controlnet,
+                                    prepare_ip_adapter,
                                     prepare_ip_adapter_sdxl, prepare_lcm_lora,
                                     prepare_lllite, prepare_motion_module,
                                     save_frames, save_imgs, save_video)
@@ -70,6 +71,7 @@ controlnet_address_table={
     "qr_code_monster_v1" : ['monster-labs/control_v1p_sd15_qrcode_monster'],
     "qr_code_monster_v2" : ['monster-labs/control_v1p_sd15_qrcode_monster', 'v2'],
     "controlnet_mediapipe_face" : ['CrucibleAI/ControlNetMediaPipeFace', "diffusion_sd15"],
+    "animatediff_controlnet" : [None, "data/models/controlnet/animatediff_controlnet/controlnet_checkpoint.ckpt"]
 }
 
 # Edit this table if you want to change to another controlnet checkpoint
@@ -112,7 +114,6 @@ lllite_address_table_sdxl={
 try:
     import onnxruntime
     onnxruntime_installed = True
-    from animatediff.dwpose import DWposeDetector
 except:
     onnxruntime_installed = False
 
@@ -285,17 +286,47 @@ def is_valid_controlnet_type(type_str, is_sdxl):
     else:
         return (type_str in controlnet_address_table_sdxl) or (type_str in lllite_address_table_sdxl)
 
+def load_controlnet_from_file(file_path, torch_dtype):
+    from safetensors.torch import load_file
 
+    prepare_extra_controlnet()
 
+    file_path = Path(file_path)
+
+    if file_path.exists() and file_path.is_file():
+        if file_path.suffix.lower() in [".pth", ".pt", ".ckpt"]:
+            controlnet_state_dict = torch.load(file_path, map_location="cpu", weights_only=True)
+        elif file_path.suffix.lower() == ".safetensors":
+            controlnet_state_dict = load_file(file_path, device="cpu")
+        else:
+            raise RuntimeError(
+                f"unknown file format for controlnet weights: {file_path.suffix}"
+            )
+    else:
+        raise FileNotFoundError(f"no controlnet weights found in {file_path}")
+
+    if file_path.parent.name == "animatediff_controlnet":
+        model = ControlNetModel(cross_attention_dim=768)
+    else:
+        model = ControlNetModel()
+
+    missing, _ = model.load_state_dict(controlnet_state_dict["state_dict"], strict=False)
+    if len(missing) > 0:
+        logger.info(f"ControlNetModel has missing keys: {missing}")
+
+    return model.to(dtype=torch_dtype)
 
 def create_controlnet_model(pipe, type_str, is_sdxl):
     if not is_sdxl:
         if type_str in controlnet_address_table:
             addr = controlnet_address_table[type_str]
-            if len(addr) == 1:
-                return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16, local_files_only=True)
+            if addr[0] != None:
+                if len(addr) == 1:
+                    return ControlNetModel.from_pretrained(addr[0], torch_dtype=torch.float16)
+                else:
+                    return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16)
             else:
-                return ControlNetModel.from_pretrained(addr[0], subfolder=addr[1], torch_dtype=torch.float16,local_files_only=True)
+                return load_controlnet_from_file(addr[1],torch_dtype=torch.float16)
         else:
             raise ValueError(f"unknown controlnet type {type_str}")
     else:
@@ -333,7 +364,6 @@ default_preprocessor_table={
 }
 
 def create_preprocessor_from_name(pre_type):
-    logger.debug(f"preprocessor type :{pre_type}")
     if pre_type == "dwpose":
         prepare_dwpose()
         return DWposeDetector()
@@ -362,25 +392,18 @@ def create_default_preprocessor(type_str):
 
 def get_preprocessor(type_str, device_str, preprocessor_map):
     if type_str not in controlnet_preprocessor:
-        logger.debug("type_str not in controlnet_preprocessor")
         if preprocessor_map:
-            logger.debug("create preprocessor from name")
             controlnet_preprocessor[type_str] = create_preprocessor_from_name(preprocessor_map["type"])
 
         if type_str not in controlnet_preprocessor:
-            logger.debug("create default preprocessor")
             controlnet_preprocessor[type_str] = create_default_preprocessor(type_str)
 
         if hasattr(controlnet_preprocessor[type_str], "processor"):
-            logger.debug('hasattr(controlnet_preprocessor[type_str], "processor"')
             if hasattr(controlnet_preprocessor[type_str].processor, "to"):
-                logger.debug('hasattr(controlnet_preprocessor[type_str].processor, "to"')
                 if device_str:
-                    logger.debug('... and controlnet_preprocessor[type_str].processor.to(device_str)')
                     controlnet_preprocessor[type_str].processor.to(device_str)
         elif hasattr(controlnet_preprocessor[type_str], "to"):
             if device_str:
-                logger.debug('controlnet_preprocessor[type_str].processor.to(device_str)')
                 controlnet_preprocessor[type_str].to(device_str)
 
 
@@ -443,6 +466,16 @@ def create_pipeline_sdxl(
     sched_kwargs = infer_config.noise_scheduler_kwargs
     scheduler = get_scheduler(model_config.scheduler, sched_kwargs)
     logger.info(f'Using scheduler "{model_config.scheduler}" ({scheduler.__class__.__name__})')
+
+    if model_config.gradual_latent_hires_fix_map:
+        if "enable" in model_config.gradual_latent_hires_fix_map:
+            if model_config.gradual_latent_hires_fix_map["enable"]:
+                if model_config.scheduler not in (DiffusionScheduler.euler_a, DiffusionScheduler.lcm):
+                    logger.warn("gradual_latent_hires_fix enable")
+                    logger.warn(f"{model_config.scheduler=}")
+                    logger.warn("If you are forced to exit with an error, change to euler_a or lcm")
+
+
 
     # Load the checkpoint weights into the pipeline
     if model_config.path is not None:
@@ -538,14 +571,26 @@ def create_pipeline_sdxl(
 
     torch.cuda.empty_cache()
 
-    if model_config.apply_lcm_lora:
-        prepare_lcm_lora()
-        load_lcm_lora(pipeline, model_config.lcm_lora_scale, is_sdxl=True)
+    pipeline.lcm = None
+    if model_config.lcm_map:
+        if model_config.lcm_map["enable"]:
+            prepare_lcm_lora()
+            load_lcm_lora(pipeline, model_config.lcm_map, is_sdxl=True)
 
     load_lora_map(pipeline, model_config.lora_map, video_length, is_sdxl=True)
 
+    pipeline.unet = pipeline.unet.half()
+    pipeline.text_encoder = pipeline.text_encoder.half()
+    pipeline.text_encoder_2 = pipeline.text_encoder_2.half()
+
     # Load TI embeddings
+    pipeline.text_encoder = pipeline.text_encoder.to("cuda")
+    pipeline.text_encoder_2 = pipeline.text_encoder_2.to("cuda")
+
     load_text_embeddings(pipeline, is_sdxl=True)
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cpu")
+    pipeline.text_encoder_2 = pipeline.text_encoder_2.to("cpu")
 
     return pipeline
 
@@ -602,6 +647,14 @@ def create_pipeline(
     feature_extractor = CLIPImageProcessor.from_pretrained(base_model, subfolder="feature_extractor")
 
     # set up scheduler
+    if model_config.gradual_latent_hires_fix_map:
+        if "enable" in model_config.gradual_latent_hires_fix_map:
+            if model_config.gradual_latent_hires_fix_map["enable"]:
+                if model_config.scheduler not in (DiffusionScheduler.euler_a, DiffusionScheduler.lcm):
+                    logger.warn("gradual_latent_hires_fix enable")
+                    logger.warn(f"{model_config.scheduler=}")
+                    logger.warn("If you are forced to exit with an error, change to euler_a or lcm")
+
     sched_kwargs = infer_config.noise_scheduler_kwargs
     scheduler = get_scheduler(model_config.scheduler, sched_kwargs)
     logger.info(f'Using scheduler "{model_config.scheduler}" ({scheduler.__class__.__name__})')
@@ -687,14 +740,23 @@ def create_pipeline(
         controlnet_map=None,
     )
 
-    if model_config.apply_lcm_lora:
-        prepare_lcm_lora()
-        load_lcm_lora(pipeline, model_config.lcm_lora_scale, is_sdxl=False)
+    pipeline.lcm = None
+    if model_config.lcm_map:
+        if model_config.lcm_map["enable"]:
+            prepare_lcm_lora()
+            load_lcm_lora(pipeline, model_config.lcm_map, is_sdxl=False)
 
     load_lora_map(pipeline, model_config.lora_map, video_length)
 
     # Load TI embeddings
+    pipeline.unet = pipeline.unet.half()
+    pipeline.text_encoder = pipeline.text_encoder.half()
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cuda")
+
     load_text_embeddings(pipeline)
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cpu")
 
     return pipeline
 
@@ -788,10 +850,7 @@ def create_us_pipeline(
                 # StableDiffusionControlNetImg2ImgPipeline.from_single_file does not exist in version 18.2
                 logger.debug("Loading from single checkpoint file")
                 tmp_pipeline = StableDiffusionPipeline.from_single_file(
-                    pretrained_model_link_or_path=str(model_path.absolute()),
-                    local_files_only=True,
-                    original_config_file="v1-inference.yaml",
-                    load_safety_checker=False
+                    pretrained_model_link_or_path=str(model_path.absolute())
                 )
                 tmp_pipeline.save_pretrained(save_path, safe_serialization=True)
                 del tmp_pipeline
@@ -856,7 +915,14 @@ def create_us_pipeline(
             load_safetensors_lora2(pipeline.text_encoder, pipeline.unet, lora_path, alpha=alpha,is_animatediff=False)
 
     # Load TI embeddings
+    pipeline.unet = pipeline.unet.half()
+    pipeline.text_encoder = pipeline.text_encoder.half()
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cuda")
+
     load_text_embeddings(pipeline)
+
+    pipeline.text_encoder = pipeline.text_encoder.to("cpu")
 
     return pipeline
 
@@ -881,7 +947,7 @@ def controlnet_preprocess(
         ):
 
     if not controlnet_map:
-        return None, None, None
+        return None, None, None, None
 
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 
@@ -895,7 +961,7 @@ def controlnet_preprocess(
 
     preprocess_on_gpu = controlnet_map["preprocess_on_gpu"] if "preprocess_on_gpu" in controlnet_map else True
     device_str = device_str if preprocess_on_gpu else None
-    logger.debug(f"controlnet device_str : {device_str}")
+
     for c in controlnet_map:
         if c == "controlnet_ref":
             continue
@@ -920,6 +986,7 @@ def controlnet_preprocess(
                             "control_guidance_end" : item["control_guidance_end"],
                             "control_scale_list" : item["control_scale_list"],
                             "guess_mode" : item["guess_mode"] if "guess_mode" in item else False,
+                            "control_region_list" : item["control_region_list"] if "control_region_list" in item else []
                         }
 
                         use_preprocessor = item["use_preprocessor"] if "use_preprocessor" in item else True
@@ -973,8 +1040,11 @@ def controlnet_preprocess(
                     save_path = det_dir.joinpath(f"{org_name}.png")
                     ref_image.save(save_path)
 
+    controlnet_no_shrink = ["controlnet_tile","animatediff_controlnet","controlnet_canny","controlnet_normalbae","controlnet_depth","controlnet_lineart","controlnet_lineart_anime","controlnet_scribble","controlnet_seg","controlnet_softedge","controlnet_mlsd"]
+    if "no_shrink_list" in controlnet_map:
+        controlnet_no_shrink = controlnet_map["no_shrink_list"]
 
-    return controlnet_image_map, controlnet_type_map, controlnet_ref_map
+    return controlnet_image_map, controlnet_type_map, controlnet_ref_map, controlnet_no_shrink
 
 
 def ip_adapter_preprocess(
@@ -985,18 +1055,16 @@ def ip_adapter_preprocess(
         out_dir: PathLike = ...,
         is_sdxl: bool = False,
         ):
-    logger.debug("Ip adapter precprocessing...")
+
     ip_adapter_map={}
 
     processed = False
 
     if ip_adapter_config_map:
         if ip_adapter_config_map["enable"] == True:
-            logger.debug("Ip adapter enabled.")
             resized_to_square = ip_adapter_config_map["resized_to_square"] if "resized_to_square" in ip_adapter_config_map else False
             image_dir = data_dir.joinpath( ip_adapter_config_map["input_image_dir"] )
             imgs = sorted(chain.from_iterable([glob.glob(os.path.join(image_dir, f"[0-9]*{ext}")) for ext in IMG_EXTENSIONS]))
-            logger.debug(f"Found {len(imgs)} in {image_dir}")
             if len(imgs) > 0:
                 prepare_ip_adapter_sdxl() if is_sdxl else prepare_ip_adapter()
                 ip_adapter_map["images"] = {}
@@ -1072,16 +1140,16 @@ def region_preprocess(
         is_init_img_exist: bool = False,
         is_sdxl:bool = False,
         ):
-    logger.debug("Region preprocessing...")
+
     is_bg_init_img = False
     if is_init_img_exist:
-        logger.debug("Is init image")
         if model_config.region_map:
             if "background" in model_config.region_map:
                 is_bg_init_img = model_config.region_map["background"]["is_init_img"]
 
 
     region_condi_list=[]
+    region2index={}
 
     condi_index = 0
 
@@ -1125,6 +1193,7 @@ def region_preprocess(
             "crop_generation_rate" : 0
         }
     ]
+    region2index["background"]=bg_src
 
     if model_config.region_map:
         for r in model_config.region_map:
@@ -1187,6 +1256,7 @@ def region_preprocess(
                     "crop_generation_rate" : model_config.region_map[r]["crop_generation_rate"] if "crop_generation_rate" in model_config.region_map[r] else 0
                 }
             )
+            region2index[r]=src
 
     ip_adapter_config_map = None
 
@@ -1212,7 +1282,7 @@ def region_preprocess(
     if not region_condi_list:
         raise ValueError("erro! There is not a single valid region")
 
-    return region_condi_list, region_list, ip_adapter_config_map
+    return region_condi_list, region_list, ip_adapter_config_map, region2index
 
 def img2img_preprocess(
         img2img_config_map: Dict[str, Any] = None,
@@ -1225,12 +1295,11 @@ def img2img_preprocess(
     img2img_map={}
 
     processed = False
-    logger.debug("Preprocessing img2img")
+
     if img2img_config_map:
         if img2img_config_map["enable"] == True:
             image_dir = data_dir.joinpath( img2img_config_map["init_img_dir"] )
             imgs = sorted(glob.glob( os.path.join(image_dir, "[0-9]*.png"), recursive=False))
-            logger.debug(f"Found {len(imgs)} in {image_dir}")
             if len(imgs) > 0:
                 img2img_map["images"] = {}
                 img2img_map["denoising_strength"] = img2img_config_map["denoising_strength"]
@@ -1408,6 +1477,7 @@ def run_inference(
     controlnet_image_map: Dict[str,Any] = None,
     controlnet_type_map: Dict[str,Any] = None,
     controlnet_ref_map: Dict[str,Any] = None,
+    controlnet_no_shrink:List[str]=None,
     no_frames :bool = False,
     img2img_map: Dict[str,Any] = None,
     ip_adapter_config_map: Dict[str,Any] = None,
@@ -1417,6 +1487,7 @@ def run_inference(
     is_single_prompt_mode: bool = False,
     is_sdxl:bool=False,
     apply_lcm_lora:bool=False,
+    gradual_latent_map: Dict[str,Any] = None,
 ):
     out_dir = Path(out_dir)  # ensure out_dir is a Path
 
@@ -1462,6 +1533,7 @@ def run_inference(
         controlnet_type_map=controlnet_type_map,
         controlnet_image_map=controlnet_image_map,
         controlnet_ref_map=controlnet_ref_map,
+        controlnet_no_shrink=controlnet_no_shrink,
         controlnet_max_samples_on_vram=controlnet_map["max_samples_on_vram"] if "max_samples_on_vram" in controlnet_map else 999,
         controlnet_max_models_on_vram=controlnet_map["max_models_on_vram"] if "max_models_on_vram" in controlnet_map else 99,
         controlnet_is_loop = controlnet_map["is_loop"] if "is_loop" in controlnet_map else True,
@@ -1472,6 +1544,7 @@ def run_inference(
         interpolation_factor=1,
         is_single_prompt_mode=is_single_prompt_mode,
         apply_lcm_lora=apply_lcm_lora,
+        gradual_latent_map=gradual_latent_map,
         callback=callback,
         callback_steps=output_map.get("preview_steps"),
     )

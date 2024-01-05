@@ -100,10 +100,11 @@ def get_infer_config(
 class ModelConfig(BaseSettings):
     name: str = Field(...)  # Config name, not actually used for much of anything
     path: Path = Field(...)  # Path to the model
-    apply_lcm_lora: bool = Field(False)
-    lcm_lora_scale: float = Field(1.0)
     vae_path: str = ""  # Path to the model
     motion_module: Path = Field(...)  # Path to the motion module
+    context_schedule: str = "uniform"
+    lcm_map: Dict[str,Any]= Field({})
+    gradual_latent_hires_fix_map: Dict[str,Any]= Field({})
     compile: bool = Field(False)  # whether to compile the model with TorchDynamo
     tensor_interpolation_slerp: bool = Field(True)
     seed: list[int] = Field([])  # Seed(s) for the random number generators

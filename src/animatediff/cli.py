@@ -62,15 +62,31 @@ checkpoint_dir = data_dir.joinpath("models/sd")
 pipeline_dir = data_dir.joinpath("models/huggingface")
 
 
-import sys
-logging.basicConfig(
-    level=logging.DEBUG,
-    stream=sys.stdout,
-    format="%(message)s",
-    datefmt="%H:%M:%S",
-    force=True,
-)
+try:
+    import google.colab
+    IN_COLAB = True
+except:
+    IN_COLAB = False
 
+if IN_COLAB:
+    import sys
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stdout,
+        format="%(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[
+            RichHandler(console=console, rich_tracebacks=True),
+        ],
+        datefmt="%H:%M:%S",
+        force=True,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +112,13 @@ except ImportError:
     logger.debug("RIFE not available, skipping...", exc_info=True)
     rife_app = None
 
-try:
-    import onnxruntime
-    from animatediff.stylize import stylize
-    cli.add_typer(stylize, name="stylize")
-except:
-    pass
+
+from animatediff.stylize import stylize
+
+cli.add_typer(stylize, name="stylize")
+
+
+
 
 # mildly cursed globals to allow for reuse of the pipeline if we're being called as a module
 g_pipeline: Optional[DiffusionPipeline] = None
@@ -174,11 +191,11 @@ def generate(
             "-C",
             min=1,
             max=32,
-            help="Number of frames to condition on (default: max of <length> or 32). max for motion module v1 is 24",
+            help="Number of frames to condition on (default: 16)",
             show_default=False,
             rich_help_panel="Generation",
         ),
-    ] = None,
+    ] = 16,
     overlap: Annotated[
         Optional[int],
         typer.Option(
@@ -330,7 +347,7 @@ def generate(
     save_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Will save outputs to ./{path_from_cwd(save_dir)}")
 
-    controlnet_image_map, controlnet_type_map, controlnet_ref_map = controlnet_preprocess(model_config.controlnet_map, width, height, length, save_dir, device, is_sdxl)
+    controlnet_image_map, controlnet_type_map, controlnet_ref_map, controlnet_no_shrink = controlnet_preprocess(model_config.controlnet_map, width, height, length, save_dir, device, is_sdxl)
     img2img_map = img2img_preprocess(model_config.img2img_map, width, height, length, save_dir)
 
     # beware the pipeline
@@ -351,7 +368,7 @@ def generate(
         logger.info("Pipeline already loaded, skipping initialization")
         # reload TIs; create_pipeline does this for us, but they may have changed
         # since load time if we're being called from another package
-        load_text_embeddings(g_pipeline, is_sdxl=is_sdxl)
+        #load_text_embeddings(g_pipeline, is_sdxl=is_sdxl)
         pipeline_already_loaded = True
 
     load_controlnet_models(pipe=g_pipeline, model_config=model_config, is_sdxl=is_sdxl)
@@ -367,6 +384,11 @@ def generate(
 
         torch.cuda.empty_cache()
 
+    apply_lcm_lora = False
+    if model_config.lcm_map:
+        if "enable" in model_config.lcm_map:
+            apply_lcm_lora = model_config.lcm_map["enable"]
+
     # save raw config to output directory
     save_config_path = save_dir.joinpath("raw_prompt.json")
     save_config_path.write_text(model_config.json(indent=4), encoding="utf-8")
@@ -380,7 +402,13 @@ def generate(
     wild_card_conversion(model_config)
 
     is_init_img_exist = img2img_map != None
-    region_condi_list, region_list, ip_adapter_config_map = region_preprocess(model_config, width, height, length, save_dir, is_init_img_exist, is_sdxl)
+    region_condi_list, region_list, ip_adapter_config_map, region2index = region_preprocess(model_config, width, height, length, save_dir, is_init_img_exist, is_sdxl)
+
+    if controlnet_type_map:
+        for c in controlnet_type_map:
+            tmp_r = [region2index[r] for r in controlnet_type_map[c]["control_region_list"]]
+            controlnet_type_map[c]["control_region_list"] = [r for r in tmp_r if r != -1]
+            logger.info(f"{c=} / {controlnet_type_map[c]['control_region_list']}")
 
     # save config to output directory
     logger.info("Saving prompt config to output directory")
@@ -423,6 +451,7 @@ def generate(
                 duration=length,
                 idx=gen_num,
                 out_dir=save_dir,
+                context_schedule=model_config.context_schedule,
                 context_frames=context,
                 context_overlap=overlap,
                 context_stride=stride,
@@ -431,6 +460,7 @@ def generate(
                 controlnet_image_map=controlnet_image_map,
                 controlnet_type_map=controlnet_type_map,
                 controlnet_ref_map=controlnet_ref_map,
+                controlnet_no_shrink=controlnet_no_shrink,
                 no_frames=no_frames,
                 img2img_map=img2img_map,
                 ip_adapter_config_map=ip_adapter_config_map,
@@ -439,7 +469,8 @@ def generate(
                 output_map = model_config.output,
                 is_single_prompt_mode=model_config.is_single_prompt_mode,
                 is_sdxl=is_sdxl,
-                apply_lcm_lora=model_config.apply_lcm_lora
+                apply_lcm_lora=apply_lcm_lora,
+                gradual_latent_map=model_config.gradual_latent_hires_fix_map
             )
             outputs.append(output)
             torch.cuda.empty_cache()
@@ -942,11 +973,11 @@ def refine(
             "-C",
             min=1,
             max=32,
-            help="Number of frames to condition on (default: max of <length> or 32). max for motion module v1 is 24",
+            help="Number of frames to condition on (default: 16)",
             show_default=False,
             rich_help_panel="Generation",
         ),
-    ] = None,
+    ] = 16,
     overlap: Annotated[
         Optional[int],
         typer.Option(

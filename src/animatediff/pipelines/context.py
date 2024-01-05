@@ -38,10 +38,51 @@ def uniform(
             yield [e % num_frames for e in range(j, j + context_size * context_step, context_step)]
 
 
+def shuffle(
+    step: int = ...,
+    num_steps: Optional[int] = None,
+    num_frames: int = ...,
+    context_size: Optional[int] = None,
+    context_stride: int = 3,
+    context_overlap: int = 4,
+    closed_loop: bool = True,
+):
+    import random
+    c = list(range(num_frames))
+    c = random.sample(c, len(c))
+
+    if len(c) % context_size:
+        c += c[0:context_size - len(c) % context_size]
+
+    c = random.sample(c, len(c))
+
+    for i in range(0, len(c), context_size):
+        yield c[i:i+context_size]
+
+
+def composite(
+    step: int = ...,
+    num_steps: Optional[int] = None,
+    num_frames: int = ...,
+    context_size: Optional[int] = None,
+    context_stride: int = 3,
+    context_overlap: int = 4,
+    closed_loop: bool = True,
+):
+    if (step/num_steps) < 0.1:
+        return shuffle(step,num_steps,num_frames,context_size,context_stride,context_overlap,closed_loop)
+    else:
+        return uniform(step,num_steps,num_frames,context_size,context_stride,context_overlap,closed_loop)
+
+
 def get_context_scheduler(name: str) -> Callable:
     match name:
         case "uniform":
             return uniform
+        case "shuffle":
+            return shuffle
+        case "composite":
+            return composite
         case _:
             raise ValueError(f"Unknown context_overlap policy {name}")
 

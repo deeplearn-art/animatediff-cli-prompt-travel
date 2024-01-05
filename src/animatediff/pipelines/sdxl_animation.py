@@ -1152,6 +1152,7 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
         interpolation_factor = 1,
         is_single_prompt_mode = False,
         apply_lcm_lora=False,
+        gradual_latent_map=None,
         **kwargs,
     ):
         r"""
@@ -1260,6 +1261,11 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
             [`~pipelines.stable_diffusion_xl.StableDiffusionXLPipelineOutput`] if `return_dict` is True, otherwise a
             `tuple`. When returning a tuple, the first element is a list with the generated images.
         """
+
+        gradual_latent = False
+        if gradual_latent_map:
+            gradual_latent = gradual_latent_map["enable"]
+
 
         logger.info(f"{apply_lcm_lora=}")
         if apply_lcm_lora:
@@ -1572,10 +1578,75 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
 
         if self.lora_map:
             self.lora_map.to(device, self.unet.dtype)
+        if self.lcm:
+            self.lcm.to(device, self.unet.dtype)
+
+        lat_height, lat_width = latents.shape[-2:]
+
+        def gradual_latent_scale(progress):
+            if gradual_latent:
+                cur = 0.5
+                for s in gradual_latent_map["scale"]:
+                    v = gradual_latent_map["scale"][s]
+                    if float(s) > progress:
+                        return cur
+                    cur = v
+                return cur
+            else:
+                return 1.0
+        def gradual_latent_size(progress):
+            if gradual_latent:
+                current_ratio = gradual_latent_scale(progress)
+                h = int(lat_height * current_ratio) // 8 * 8
+                w = int(lat_width * current_ratio) // 8 * 8
+                return (h,w)
+            else:
+                return (lat_height, lat_width)
+
+        def unsharp_mask(img):
+            imgf = img.float()
+            k = 0.05 # strength
+            kernel = torch.FloatTensor([[0,   -k,    0],
+                                        [-k, 1+4*k, -k],
+                                        [0,   -k,    0]])
+
+            conv_kernel = torch.eye(4)[..., None, None] * kernel[None, None, ...]
+            imgf = torch.nn.functional.conv2d(imgf, conv_kernel.to(img.device), padding=1)
+            return imgf.to(img.dtype)
+
+        def resize_tensor(ten, size, do_unsharp_mask=False):
+            ten = rearrange(ten, "b c f h w -> (b f) c h w")
+            ten = torch.nn.functional.interpolate(
+                ten.float(), size=size, mode="bicubic", align_corners=False
+            ).to(ten.dtype)
+            if do_unsharp_mask:
+                ten = unsharp_mask(ten)
+            return rearrange(ten, "(b f) c h w -> b c f h w", f=video_length)
+
+        if gradual_latent:
+            latents = resize_tensor(latents, gradual_latent_size(0))
+            reverse_steps = gradual_latent_map["reverse_steps"]
+            noise_add_count = gradual_latent_map["noise_add_count"]
+            total_steps = ((total_steps/num_inference_steps) * (reverse_steps* (len(gradual_latent_map["scale"].keys()) - 1) )) + total_steps
+            total_steps = int(total_steps)
+
+        prev_gradient_latent_size = gradual_latent_size(0)
+
+
 
         with self.progress_bar(total=total_steps) as progress_bar:
 
-            for i, t in enumerate(timesteps):
+            i = 0
+            real_i = 0
+#            for i, t in enumerate(timesteps):
+            while i < len(timesteps):
+                t = timesteps[i]
+
+                cur_gradient_latent_size = gradual_latent_size((real_i+1) / len(timesteps))
+
+                if self.lcm:
+                    self.lcm.apply(i, len(timesteps))
+
 
                 noise_pred = torch.zeros(
                     (latents.shape[0] * condi_size, *latents.shape[1:]),
@@ -1766,11 +1837,20 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
 
                             controlnet_added_cond_kwargs = {"text_embeds": controlnet_add_text_embeds.to(device=device), "time_ids": add_time_ids}
 
+                            cont_var_img = cont_var["image"].to(device=device)
+
+                            if gradual_latent:
+                                cur_lat_height, cur_lat_width = latents.shape[-2:]
+                                cont_var_img = torch.nn.functional.interpolate(
+                                    cont_var_img.float(), size=(cur_lat_height*8, cur_lat_width*8), mode="bicubic", align_corners=False
+                                ).to(cont_var_img.dtype)
+
+
                             down_samples, mid_sample = self.controlnet_map[type_str](
                                 control_model_input,
                                 t,
                                 encoder_hidden_states=controlnet_prompt_embeds.to(device=device),
-                                controlnet_cond=cont_var["image"].to(device=device),
+                                controlnet_cond=cont_var_img,
                                 conditioning_scale=cont_var["cond_scale"],
                                 guess_mode=cont_var["guess_mode"],
                                 added_cond_kwargs=controlnet_added_cond_kwargs,
@@ -1868,6 +1948,7 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                         wh = None
 
                         if i < len(timesteps) * region_mask.get_crop_generation_rate(layer_index, latent_model_input.shape[0]):
+                            #TODO lllite
                             wh, xy_list = region_mask.get_area(layer_index, latent_model_input.shape[0], context)
                             if wh:
                                 a_w, a_h = wh
@@ -1948,6 +2029,11 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                     noise_pred = torch.cat(noise_list)
 
 
+                if gradual_latent:
+                    if prev_gradient_latent_size != cur_gradient_latent_size:
+                        noise_pred = resize_tensor(noise_pred, cur_gradient_latent_size, True)
+                        latents = resize_tensor(latents, cur_gradient_latent_size, True)
+
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
 
@@ -1968,6 +2054,8 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
 
                 for r_no in range(len(region_list)):
                     mask = region_mask.get_mask( r_no )
+                    if gradual_latent:
+                        mask = resize_tensor(mask, cur_gradient_latent_size)
                     src = region_list[r_no]["src"]
                     if src == -1:
                         init_latents_proper = image_latents[:1]
@@ -1978,7 +2066,10 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                                 init_latents_proper, noise, torch.tensor([noise_timestep])
                             )
 
-                        lat = init_latents_proper
+                        if gradual_latent:
+                            lat = resize_tensor(init_latents_proper, cur_gradient_latent_size)
+                        else:
+                            lat = init_latents_proper
                     else:
                         lat = latents_list[src]
 
@@ -1990,6 +2081,24 @@ class AnimationPipeline(DiffusionPipeline, FromSingleFileMixin, LoraLoaderMixin,
                 lat = None
                 latents_list = None
                 tmp_latent = None
+
+                i+=1
+                real_i = max(i, real_i)
+                if gradual_latent:
+                    if prev_gradient_latent_size != cur_gradient_latent_size:
+                        reverse = min(i, reverse_steps)
+                        self.scheduler._step_index -= reverse
+                        _noise = resize_tensor(noise, cur_gradient_latent_size)
+                        for count in range(i, i+noise_add_count):
+                            count = min(count,len(timesteps)-1)
+                            latents = self.scheduler.add_noise(
+                                latents, _noise, torch.tensor([timesteps[count]])
+                            )
+                        i -= reverse
+                        torch.cuda.empty_cache()
+
+                prev_gradient_latent_size = cur_gradient_latent_size
+
 
         controlnet_result = None
         torch.cuda.empty_cache()

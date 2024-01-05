@@ -34,6 +34,31 @@ stylize: typer.Typer = typer.Typer(
 
 data_dir = get_dir("data")
 
+controlnet_dirs = [
+    "controlnet_canny",
+    "controlnet_depth",
+    "controlnet_inpaint",
+    "controlnet_ip2p",
+    "controlnet_lineart",
+    "controlnet_lineart_anime",
+    "controlnet_mlsd",
+    "controlnet_normalbae",
+    "controlnet_openpose",
+    "controlnet_scribble",
+    "controlnet_seg",
+    "controlnet_shuffle",
+    "controlnet_softedge",
+    "controlnet_tile",
+    "qr_code_monster_v1",
+    "qr_code_monster_v2",
+    "controlnet_mediapipe_face",
+    "animatediff_controlnet",
+    ]
+
+def create_controlnet_dir(controlnet_root):
+    for c in controlnet_dirs:
+        c_dir = controlnet_root.joinpath(c)
+        c_dir.mkdir(parents=True, exist_ok=True)
 
 @stylize.command(no_args_is_help=True)
 def create_config(
@@ -189,6 +214,15 @@ def create_config(
             help="low vram mode",
         ),
     ] = False,
+    gradual_latent_hires_fix: Annotated[
+        bool,
+        typer.Option(
+            "--gradual_latent_hires_fix",
+            "-gh",
+            is_flag=True,
+            help="gradual latent hires fix",
+        ),
+    ] = False,
 ):
     """Create a config file for video stylization"""
     is_danbooru_format = not is_no_danbooru_format
@@ -209,6 +243,7 @@ def create_config(
     logger.info(f"{is_danbooru_format=}")
     logger.info(f"{is_img2img=}")
     logger.info(f"{low_vram=}")
+    logger.info(f"{gradual_latent_hires_fix=}")
 
     model_config: ModelConfig = get_model_config(config_org)
 
@@ -225,16 +260,11 @@ def create_config(
 
     controlnet_img_dir = save_dir.joinpath("00_controlnet_image")
 
-    for c in ["controlnet_canny","controlnet_depth","controlnet_inpaint","controlnet_ip2p","controlnet_lineart","controlnet_lineart_anime","controlnet_mlsd","controlnet_normalbae","controlnet_openpose","controlnet_scribble","controlnet_seg","controlnet_shuffle","controlnet_softedge","controlnet_tile"]:
-        c_dir = controlnet_img_dir.joinpath(c)
-        c_dir.mkdir(parents=True, exist_ok=True)
+    create_controlnet_dir(controlnet_img_dir)
 
-    if not is_img2img:
-        shutil.copytree(img2img_dir, controlnet_img_dir.joinpath("controlnet_tile"), dirs_exist_ok=True)
-    else:
-        shutil.copytree(img2img_dir, controlnet_img_dir.joinpath("controlnet_openpose"), dirs_exist_ok=True)
+    shutil.copytree(img2img_dir, controlnet_img_dir.joinpath("controlnet_openpose"), dirs_exist_ok=True)
 
-    shutil.copytree(img2img_dir, controlnet_img_dir.joinpath("controlnet_ip2p"), dirs_exist_ok=True)
+    #shutil.copytree(img2img_dir, controlnet_img_dir.joinpath("controlnet_ip2p"), dirs_exist_ok=True)
 
 
     black_list = []
@@ -262,31 +292,20 @@ def create_config(
     model_config.lora_map={}
     model_config.motion_lora_map={}
 
-    if low_vram:
-        model_config.controlnet_map["max_samples_on_vram"] = 0
-        model_config.controlnet_map["max_models_on_vram"] = 0
+    model_config.controlnet_map["max_samples_on_vram"] = 0
+    model_config.controlnet_map["max_models_on_vram"] = 0
 
 
-    if not is_img2img:
-        model_config.controlnet_map["controlnet_tile"] = {
+    model_config.controlnet_map["controlnet_openpose"] = {
         "enable": True,
         "use_preprocessor":True,
         "guess_mode":False,
         "controlnet_conditioning_scale": 1.0,
         "control_guidance_start": 0.0,
         "control_guidance_end": 1.0,
-        "control_scale_list":[]
-        }
-    else:
-        model_config.controlnet_map["controlnet_openpose"] = {
-        "enable": True,
-        "use_preprocessor":True,
-        "guess_mode":False,
-        "controlnet_conditioning_scale": 1.0,
-        "control_guidance_start": 0.0,
-        "control_guidance_end": 1.0,
-        "control_scale_list":[]
-        }
+        "control_scale_list":[],
+        "control_region_list":[]
+    }
 
 
     model_config.controlnet_map["controlnet_ip2p"] = {
@@ -296,7 +315,8 @@ def create_config(
       "controlnet_conditioning_scale": 0.5,
       "control_guidance_start": 0.0,
       "control_guidance_end": 1.0,
-      "control_scale_list":[]
+      "control_scale_list":[],
+      "control_region_list":[]
     }
 
     for m in model_config.controlnet_map:
@@ -331,6 +351,16 @@ def create_config(
 
     }
 
+    model_config.gradual_latent_hires_fix_map = {
+        "enable" : True,
+        "scale" : {
+            "0": 0.5,
+            "0.7": 1.0
+        },
+        "reverse_steps": 5,
+        "noise_add_count": 3
+    }
+
     model_config.output = {
         "format" : "mp4",
         "fps" : fps,
@@ -342,12 +372,14 @@ def create_config(
     img = Image.open( img2img_dir.joinpath("00000000.png") )
     W, H = img.size
 
+    base_size = 768 if gradual_latent_hires_fix else 512
+
     if W < H:
-        width = 512
-        height = int(512 * H/W)
+        width = base_size
+        height = int(base_size * H/W)
     else:
-        width = int(512 * W/H)
-        height = 512
+        width = int(base_size * W/H)
+        height = base_size
 
     width = int(width//8*8)
     height = int(height//8*8)
@@ -421,6 +453,10 @@ def create_config(
         }
     }
 
+    if gradual_latent_hires_fix:
+        model_config.stylize_config.pop("1")
+
+
     save_config_path = save_dir.joinpath("prompt.json")
     save_config_path.write_text(model_config.json(indent=4), encoding="utf-8")
 
@@ -493,7 +529,7 @@ def generate(
             shutil.rmtree(new_controlnet_img_dir)
         new_controlnet_img_dir.mkdir(parents=True, exist_ok=True)
 
-        for c in ["controlnet_canny","controlnet_depth","controlnet_inpaint","controlnet_ip2p","controlnet_lineart","controlnet_lineart_anime","controlnet_mlsd","controlnet_normalbae","controlnet_openpose","controlnet_scribble","controlnet_seg","controlnet_shuffle","controlnet_softedge","controlnet_tile"]:
+        for c in controlnet_dirs:
             src_dir = org_controlnet_img_dir.joinpath(c)
             dst_dir = new_controlnet_img_dir.joinpath(c)
             if src_dir.is_dir():
@@ -595,10 +631,7 @@ def generate(
     img2img_dir = stylize_dir.joinpath("01_img2img")
     img2img_dir.mkdir(parents=True, exist_ok=True)
 
-    for c in ["controlnet_canny","controlnet_depth","controlnet_inpaint","controlnet_ip2p","controlnet_lineart","controlnet_lineart_anime","controlnet_mlsd","controlnet_normalbae","controlnet_openpose","controlnet_scribble","controlnet_seg","controlnet_shuffle","controlnet_softedge","controlnet_tile"]:
-        c_dir = controlnet_img_dir.joinpath(c)
-        c_dir.mkdir(parents=True, exist_ok=True)
-
+    create_controlnet_dir(controlnet_img_dir)
 
     ip2p_for_upscale = model_config.stylize_config["1"]["controlnet_ip2p"]["enable"]
     ip_adapter_for_upscale = model_config.stylize_config["1"]["ip_adapter"]
@@ -986,12 +1019,6 @@ def create_mask(
 
     masked_area = [None for f in range(frame_len)]
 
-
-    def create_controlnet_dir(controlnet_root):
-        for c in ["controlnet_canny","controlnet_depth","controlnet_inpaint","controlnet_ip2p","controlnet_lineart","controlnet_lineart_anime","controlnet_mlsd","controlnet_normalbae","controlnet_openpose","controlnet_scribble","controlnet_seg","controlnet_shuffle","controlnet_softedge","controlnet_tile"]:
-            c_dir = controlnet_root.joinpath(c)
-            c_dir.mkdir(parents=True, exist_ok=True)
-
     if use_rembg:
         create_mask_list = ["rembg"]
     elif use_animeseg:
@@ -1056,12 +1083,9 @@ def create_mask(
 
         logger.info(f"mask from [{mask_token}] are output to {fg_dir}")
 
-        if not is_img2img:
-            shutil.copytree(fg_masked_dir, fg_dir / "00_controlnet_image/controlnet_tile", dirs_exist_ok=True)
-        else:
-            shutil.copytree(fg_masked_dir, fg_dir / "00_controlnet_image/controlnet_openpose", dirs_exist_ok=True)
+        shutil.copytree(fg_masked_dir, fg_dir / "00_controlnet_image/controlnet_openpose", dirs_exist_ok=True)
 
-        shutil.copytree(fg_masked_dir, fg_dir / "00_controlnet_image/controlnet_ip2p", dirs_exist_ok=True)
+        #shutil.copytree(fg_masked_dir, fg_dir / "00_controlnet_image/controlnet_ip2p", dirs_exist_ok=True)
 
         if crop_size_hw:
             if crop_size_hw[0] == 0 or crop_size_hw[1] == 0:
@@ -1089,10 +1113,7 @@ def create_mask(
 
     logger.info(f"background are output to {bg_dir}")
 
-    if not is_img2img:
-        shutil.copytree(bg_inpaint_dir, bg_dir / "00_controlnet_image/controlnet_tile", dirs_exist_ok=True)
-    else:
-        shutil.copytree(bg_inpaint_dir, bg_dir / "00_controlnet_image/controlnet_openpose", dirs_exist_ok=True)
+    shutil.copytree(bg_inpaint_dir, bg_dir / "00_controlnet_image/controlnet_tile", dirs_exist_ok=True)
 
     shutil.copytree(bg_inpaint_dir, bg_dir / "00_controlnet_image/controlnet_ip2p", dirs_exist_ok=True)
 

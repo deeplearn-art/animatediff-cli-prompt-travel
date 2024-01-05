@@ -479,6 +479,26 @@ class RegionMask:
         ):
         return self.region_list[region_index]["mask_latents"]
 
+    def get_region_from_layer(
+            self,
+            cond_layer,
+            cond_nums,
+        ):
+        if self.multi_uncond_mode:
+            cond_layer = cond_layer if cond_layer < cond_nums//2 else cond_layer - cond_nums//2
+        else:
+            if cond_layer == 0:
+                return -1    #uncond for all layer
+
+            cond_layer -= 1
+
+        if cond_layer not in self.cond2region:
+            logger.warn(f"unknown {cond_layer=}")
+            return -1
+
+        return self.cond2region[cond_layer]
+
+
     def get_area(
             self,
             cond_layer,
@@ -573,6 +593,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
     ]
     controlnet_map: Dict[ str , ControlNetModel ]
     ip_adapter: IPAdapter = None
+
+    model_cpu_offload_seq = "text_encoder->unet->vae"
 
     def __init__(
         self,
@@ -689,7 +711,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         """
         self.vae.disable_tiling()
 
-    def enable_model_cpu_offload(self, gpu_id=0):
+    def __enable_model_cpu_offload(self, gpu_id=0):
         r"""
         Offloads all models to CPU using accelerate, reducing memory usage with a low impact on performance. Compared
         to `enable_sequential_cpu_offload`, this method moves one whole model at a time to the GPU when its `forward`
@@ -997,7 +1019,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         video = []
         for frame_idx in range(latents.shape[0]):
             video.append(
-                self.vae.decode(latents[frame_idx : frame_idx + 1].to(self.vae.device, self.vae.dtype)).sample.cpu()
+#                self.vae.decode(latents[frame_idx : frame_idx + 1].to(self.vae.device, self.vae.dtype)).sample.cpu()
+                self.vae.decode(latents[frame_idx : frame_idx + 1].to("cuda", self.vae.dtype)).sample.cpu()
             )
         video = torch.cat(video)
         video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
@@ -1162,27 +1185,27 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         image_latents = None
 
         if img2img_map:
-            image_latents = torch.zeros(shape, device=self.unet.device, dtype=self.vae.dtype)
+            image_latents = torch.zeros(shape, device=device, dtype=dtype)
             for frame_no in img2img_map["images"]:
                 img = img2img_map["images"][frame_no]
                 img = self.image_processor.preprocess(img)
-                img = img.to(device=self.unet.device, dtype=self.vae.dtype)
+                img = img.to(device="cuda", dtype=self.vae.dtype)
                 img = self.vae.encode(img).latent_dist.sample(generator)
                 img = self.vae.config.scaling_factor * img
                 img = torch.cat([img], dim=0)
-                image_latents[:,:,frame_no,:,:] = img
+                image_latents[:,:,frame_no,:,:] = img.to(device=device, dtype=dtype)
+
         else:
             is_strength_max = True
 
 
         if latents is None:
-            noise = randn_tensor(shape, generator=generator, device=self.unet.device, dtype=dtype)
+            noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
             latents = noise if is_strength_max else self.scheduler.add_noise(image_latents, noise, timestep)
             latents = latents * self.scheduler.init_noise_sigma if is_strength_max else latents
         else:
             noise = latents.to(device)
             latents = noise * self.scheduler.init_noise_sigma
-
 
         outputs = (latents.to(device, dtype),)
 
@@ -2360,6 +2383,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         controlnet_type_map: Dict[str, Dict[str,float]] = None,
         controlnet_image_map: Dict[int, Dict[str,Any]] = None,
         controlnet_ref_map: Dict[str, Any] = None,
+        controlnet_no_shrink:List[str]=None,
         controlnet_max_samples_on_vram: int = 999,
         controlnet_max_models_on_vram: int=99,
         controlnet_is_loop: bool=True,
@@ -2370,10 +2394,16 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         interpolation_factor = 1,
         is_single_prompt_mode = False,
         apply_lcm_lora= False,
+        gradual_latent_map=None,
         **kwargs,
     ):
+        import gc
+
         global C_REF_MODE
 
+        gradual_latent = False
+        if gradual_latent_map:
+            gradual_latent = gradual_latent_map["enable"]
 
         logger.info(f"{apply_lcm_lora=}")
         if apply_lcm_lora:
@@ -2390,7 +2420,23 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         sequential_mode = video_length is not None and video_length > context_frames
 
         multi_uncond_mode = self.lora_map is not None
+
+        controlnet_for_region = False
+        if controlnet_type_map:
+            for c in controlnet_type_map:
+                reg_list = controlnet_type_map[c]["control_region_list"]
+                if reg_list:
+                    controlnet_for_region = True
+                    break
+
+        if controlnet_for_region or multi_uncond_mode:
+            controlnet_for_region = True
+            multi_uncond_mode = True
+            unet_batch_size = 1
+
+        logger.info(f"{controlnet_for_region=}")
         logger.info(f"{multi_uncond_mode=}")
+        logger.info(f"{unet_batch_size=}")
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -2452,6 +2498,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             if multi_uncond_mode:
                 raise ValueError(f"controlnet_ref is not available in this configuration. {multi_uncond_mode=}")
 
+
+        logger.info(f"{prompt_encoder.get_condi_size()=}")
 
 
         # 3.5 Prepare controlnet variables
@@ -2615,6 +2663,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         del img2img_map
         torch.cuda.empty_cache()
+        gc.collect()
 
         # 5.5 Prepare region mask
         region_mask = RegionMask(
@@ -2676,14 +2725,90 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             context_overlap,
         )
 
+        lat_height, lat_width = latents.shape[-2:]
+
+        def gradual_latent_scale(progress):
+            if gradual_latent:
+                cur = 0.5
+                for s in gradual_latent_map["scale"]:
+                    v = gradual_latent_map["scale"][s]
+                    if float(s) > progress:
+                        return cur
+                    cur = v
+                return cur
+            else:
+                return 1.0
+        def gradual_latent_size(progress):
+            if gradual_latent:
+                current_ratio = gradual_latent_scale(progress)
+                h = int(lat_height * current_ratio)
+                w = int(lat_width * current_ratio)
+                return (h,w)
+            else:
+                return (lat_height, lat_width)
+
+        def unsharp_mask(img):
+            imgf = img.float()
+            k = 0.05 # strength
+            kernel = torch.FloatTensor([[0,   -k,    0],
+                                        [-k, 1+4*k, -k],
+                                        [0,   -k,    0]])
+
+            conv_kernel = torch.eye(4)[..., None, None] * kernel[None, None, ...]
+            imgf = torch.nn.functional.conv2d(imgf, conv_kernel.to(img.device), padding=1)
+            return imgf.to(img.dtype)
+
+        def resize_tensor(ten, size, do_unsharp_mask=False):
+            ten = rearrange(ten, "b c f h w -> (b f) c h w")
+            ten = torch.nn.functional.interpolate(
+                ten.float(), size=size, mode="bicubic", align_corners=False
+            ).to(ten.dtype)
+            if do_unsharp_mask:
+                ten = unsharp_mask(ten)
+            return rearrange(ten, "(b f) c h w -> b c f h w", f=video_length)
+
+        if gradual_latent:
+            latents = resize_tensor(latents, gradual_latent_size(0))
+            reverse_steps = gradual_latent_map["reverse_steps"]
+            noise_add_count = gradual_latent_map["noise_add_count"]
+            total_steps = ((total_steps/num_inference_steps) * (reverse_steps* (len(gradual_latent_map["scale"].keys()) - 1) )) + total_steps
+            total_steps = int(total_steps)
+
+        prev_gradient_latent_size = gradual_latent_size(0)
+
+
+        shrink_controlnet = True
+        no_shrink_type = controlnet_no_shrink
+
+        if controlnet_type_map:
+            for nt in no_shrink_type:
+                if nt in controlnet_type_map:
+                    controlnet_type_map[nt] = controlnet_type_map.pop(nt)
+
+        def need_region_blend(cur_step, total_steps):
+            if cur_step + 1 == total_steps:
+                return True
+            if multi_uncond_mode == False:
+                return True
+            return cur_step % 2 == 1
+
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=total_steps) as progress_bar:
-            for i, t in enumerate(timesteps):
+            i = 0
+            real_i = 0
+#            for i, t in enumerate(timesteps):
+            while i < len(timesteps):
+                t = timesteps[i]
                 stopwatch_start()
 
+                cur_gradient_latent_size = gradual_latent_size((real_i+1) / len(timesteps))
+
+                if self.lcm:
+                    self.lcm.apply(i, len(timesteps))
+
                 noise_pred = torch.zeros(
-                    (latents.shape[0] * prompt_encoder.get_condi_size(), *latents.shape[1:]),
+                    (prompt_encoder.get_condi_size(), *latents.shape[1:]),
                     device=latents.device,
                     dtype=latents.dtype,
                 )
@@ -2694,7 +2819,14 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 # { "0_type_str" : (down_samples, mid_sample)  }
                 controlnet_result={}
 
-                def get_controlnet_result(context: List[int] = None):
+                def scale_5d_tensor(ten, h, w, f):
+                    ten = rearrange(ten, "b c f h w -> (b f) c h w")
+                    ten = torch.nn.functional.interpolate(
+                            ten, size=(h, w), mode="bicubic", align_corners=False
+                        )
+                    return rearrange(ten, "(b f) c h w -> b c f h w", f=f)
+
+                def get_controlnet_result(context: List[int] = None, layer:int = -1):
                     #logger.info(f"get_controlnet_result called {context=}")
 
                     if controlnet_image_map is None:
@@ -2708,57 +2840,140 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     if hit == False:
                         return None, None
 
+
+                    def is_control_layer(type_str, layer):
+                        if layer == -1:
+                            return True
+                        region_list = controlnet_type_map[type_str]["control_region_list"]
+                        if not region_list:
+                            return True
+                        r = region_mask.get_region_from_layer(layer, prompt_encoder.get_condi_size())
+                        if r == -1:
+                            return False
+                        return r in region_list
+
+
+                    def to_device(sample, target_device):
+                        down_samples = [
+                            v.to(device = target_device, non_blocking=True) if v.device != target_device else v
+                            for v in sample[0] ]
+                        mid_sample = sample[1].to(device = target_device, non_blocking=True) if sample[1].device != target_device else sample[1]
+                        return (down_samples, mid_sample)
+
                     _down_block_res_samples=[]
 
                     first_down = list(list(controlnet_result.values())[0].values())[0][0]
                     first_mid = list(list(controlnet_result.values())[0].values())[0][1]
+
+                    shape0 = first_mid.shape[0] if layer == -1 else 1
                     for ii in range(len(first_down)):
                         _down_block_res_samples.append(
                             torch.zeros(
-                                (first_down[ii].shape[0], first_down[ii].shape[1], len(context) ,*first_down[ii].shape[3:]),
+                                (shape0, first_down[ii].shape[1], len(context) ,*first_down[ii].shape[3:]),
                                 device=device,
                                 dtype=first_down[ii].dtype,
                                 ))
                     _mid_block_res_samples =  torch.zeros(
-                                    (first_mid.shape[0], first_mid.shape[1], len(context) ,*first_mid.shape[3:]),
+                                    (shape0, first_mid.shape[1], len(context) ,*first_mid.shape[3:]),
                                     device=device,
                                     dtype=first_mid.dtype,
                                     )
 
-                    for fr in controlnet_result:
-                        for type_str in controlnet_result[fr]:
-                            result = str(fr) + "_" + type_str
 
-                            val = controlnet_result[fr][type_str]
+                    def merge_result(fr, type_str):
+                        nonlocal _mid_block_res_samples, _down_block_res_samples
+                        result = str(fr) + "_" + type_str
+
+                        val = controlnet_result[fr][type_str]
+
+                        if layer == -1:
                             cur_down = [
                                     v.to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v
                                     for v in val[0]
                                     ]
                             cur_mid =val[1].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1]
-                            loc =  list(set(context) & set(controlnet_scale_map[result]["frames"]))
-                            scales = []
+                        else:
+                            cur_down = [
+                                    v[layer].to(device = device, dtype=first_down[0].dtype, non_blocking=True) if v.device != device else v[layer]
+                                    for v in val[0]
+                                    ]
+                            cur_mid =val[1][layer].to(device = device, dtype=first_mid.dtype, non_blocking=True) if val[1].device != device else val[1][layer]
 
-                            for o in loc:
-                                for j, f in enumerate(controlnet_scale_map[result]["frames"]):
-                                    if o == f:
-                                        scales.append(controlnet_scale_map[result]["scales"][j])
-                                        break
-                            loc_index=[]
+                        loc =  list(set(context) & set(controlnet_scale_map[result]["frames"]))
+                        scales = []
 
-                            for o in loc:
-                                for j, f in enumerate( context ):
-                                    if o==f:
-                                        loc_index.append(j)
-                                        break
+                        for o in loc:
+                            for j, f in enumerate(controlnet_scale_map[result]["frames"]):
+                                if o == f:
+                                    scales.append(controlnet_scale_map[result]["scales"][j])
+                                    break
+                        loc_index=[]
 
-                            mod = torch.tensor(scales).to(device, dtype=cur_mid.dtype)
+                        for o in loc:
+                            for j, f in enumerate( context ):
+                                if o==f:
+                                    loc_index.append(j)
+                                    break
 
-                            add = cur_mid * mod[None,None,:,None,None]
-                            _mid_block_res_samples[:, :, loc_index, :, :] = _mid_block_res_samples[:, :, loc_index, :, :] + add
+                        mod = torch.tensor(scales).to(device, dtype=cur_mid.dtype)
 
-                            for ii in range(len(cur_down)):
-                                add = cur_down[ii] * mod[None,None,:,None,None]
-                                _down_block_res_samples[ii][:, :, loc_index, :, :] = _down_block_res_samples[ii][:, :, loc_index, :, :] + add
+                        '''
+                        for ii in range(len(_down_block_res_samples)):
+                            logger.info(f"{type_str=} / {cur_down[ii].shape=}")
+                            logger.info(f"{type_str=} / {_down_block_res_samples[ii].shape=}")
+                        logger.info(f"{type_str=} / {cur_mid.shape=}")
+                        logger.info(f"{type_str=} / {_mid_block_res_samples.shape=}")
+                        '''
+
+                        add = cur_mid * mod[None,None,:,None,None]
+                        _mid_block_res_samples[:, :, loc_index, :, :] = _mid_block_res_samples[:, :, loc_index, :, :] + add
+
+                        for ii in range(len(cur_down)):
+                            add = cur_down[ii] * mod[None,None,:,None,None]
+                            _down_block_res_samples[ii][:, :, loc_index, :, :] = _down_block_res_samples[ii][:, :, loc_index, :, :] + add
+
+
+
+
+                    hit = False
+
+                    no_shrink_list = []
+
+                    for fr in controlnet_result:
+                        for type_str in controlnet_result[fr]:
+                            if not is_control_layer(type_str, layer):
+                                continue
+
+                            hit = True
+
+                            if shrink_controlnet and (type_str in no_shrink_type):
+                                no_shrink_list.append(type_str)
+                                continue
+
+                            merge_result(fr, type_str)
+
+                    cur_d_height, cur_d_width = _down_block_res_samples[0].shape[-2:]
+                    cur_lat_height, cur_lat_width = latents.shape[-2:]
+                    if cur_lat_height != cur_d_height:
+                        #logger.info(f"{cur_lat_height=} / {cur_d_height=}")
+                        for ii, rate in zip(range(len(_down_block_res_samples)), (1,1,1,2,2,2,4,4,4,8,8,8)):
+                            new_h = (cur_lat_height + rate-1) // rate
+                            new_w = (cur_lat_width + rate-1) // rate
+                            #logger.info(f"b {_down_block_res_samples[ii].shape=}")
+                            _down_block_res_samples[ii] = scale_5d_tensor(_down_block_res_samples[ii], new_h, new_w, context_frames)
+                            #logger.info(f"a {_down_block_res_samples[ii].shape=}")
+                        _mid_block_res_samples = scale_5d_tensor(_mid_block_res_samples, (cur_lat_height + rate - 1)// 8, (cur_lat_width + rate - 1)// 8, context_frames)
+
+
+                    for fr in controlnet_result:
+                        for type_str in controlnet_result[fr]:
+                            if type_str not in no_shrink_list:
+                                continue
+                            merge_result(fr, type_str)
+
+
+                    if not hit:
+                        return None, None
 
                     return _down_block_res_samples, _mid_block_res_samples
 
@@ -2781,10 +2996,13 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         nonlocal controlnet_samples_on_vram
 
                         if controlnet_max_samples_on_vram <= controlnet_samples_on_vram:
-                            down_samples = [
-                                v.to(device = torch.device("cpu"), non_blocking=True) if v.device != torch.device("cpu") else v
-                                for v in sample[0] ]
-                            mid_sample = sample[1].to(device = torch.device("cpu"), non_blocking=True) if sample[1].device != torch.device("cpu") else sample[1]
+                            if sample[0][0].device != torch.device("cpu"):
+                                down_samples = [ v.to(device = torch.device("cpu"), non_blocking=True) for v in sample[0] ]
+                                mid_sample = sample[1].to(device = torch.device("cpu"), non_blocking=True)
+                            else:
+                                down_samples = sample[0]
+                                mid_sample = sample[1]
+
                         else:
                             if sample[0][0].device != device:
                                 down_samples = [ v.to(device = device, non_blocking=True) for v in sample[0] ]
@@ -2792,6 +3010,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                             else:
                                 down_samples = sample[0]
                                 mid_sample = sample[1]
+
                             controlnet_samples_on_vram += 1
                         return down_samples, mid_sample
 
@@ -2812,11 +3031,35 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         for cont_var in cont_vars:
                             frame_no = cont_var["frame_no"]
 
-                            latent_model_input = (
-                                latents[:, :, [frame_no]]
-                                .to(device)
-                                .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
-                            )
+                            if latents.shape[0] == 1:
+                                latent_model_input = (
+                                    latents[:, :, [frame_no]]
+                                    .to(device)
+                                    .repeat( prompt_encoder.get_condi_size(), 1, 1, 1, 1)
+                                )
+                            else:
+                                latent_model_input=[]
+                                for s0_index in list(range(latents.shape[0])) + list(range(latents.shape[0])):
+                                    latent_model_input.append( latents[[s0_index], :, [frame_no]].to(device).unsqueeze(dim=2) )
+                                latent_model_input = torch.cat(latent_model_input)
+
+                            if shrink_controlnet and (type_str not in no_shrink_type):
+                                cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
+                                cur = min(cur_lat_height, cur_lat_width)
+                                if cur > 64:    # 512 / 8 = 64
+                                    if cur_lat_height > cur_lat_width:
+                                        shr_lat_height = 64 * cur_lat_height / cur_lat_width
+                                        shr_lat_width = 64
+                                    else:
+                                        shr_lat_height = 64
+                                        shr_lat_width = 64 * cur_lat_width / cur_lat_height
+                                    shr_lat_height = int(shr_lat_height // 8 * 8)
+                                    shr_lat_width = int(shr_lat_width // 8 * 8)
+                                    #logger.info(f"b {latent_model_input.shape=}")
+                                    latent_model_input = scale_5d_tensor(latent_model_input, shr_lat_height, shr_lat_width, 1)
+                                    #logger.info(f"a {latent_model_input.shape=}")
+
+
                             control_model_input = self.scheduler.scale_model_input(latent_model_input, t)[:, :, 0]
                             controlnet_prompt_embeds = prompt_encoder.get_current_prompt_embeds([frame_no], latents.shape[2])
 
@@ -2855,11 +3098,20 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 mid_sample = torch.cat(__mid_list)
 
                             else:
+                                cont_var_img = cont_var["image"].to(device=device)
+
+                                cur_lat_height, cur_lat_width = latent_model_input.shape[-2:]
+                                cur_img_height, cur_img_width = cont_var_img.shape[-2:]
+                                if (cur_lat_height*8 != cur_img_height) or (cur_lat_width*8 != cur_img_width):
+                                    cont_var_img = torch.nn.functional.interpolate(
+                                        cont_var_img.float(), size=(cur_lat_height*8, cur_lat_width*8), mode="bicubic", align_corners=False
+                                    ).to(cont_var_img.dtype)
+
                                 down_samples, mid_sample = self.controlnet_map[type_str](
                                     control_model_input,
                                     t,
                                     encoder_hidden_states=controlnet_prompt_embeds.to(device=device),
-                                    controlnet_cond=cont_var["image"].to(device=device),
+                                    controlnet_cond=cont_var_img,
                                     conditioning_scale=cont_var["cond_scale"],
                                     guess_mode=cont_var["guess_mode"],
                                     return_dict=False,
@@ -2871,6 +3123,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                             if frame_no not in controlnet_result:
                                 controlnet_result[frame_no] = {}
+
+                            '''
+                            for ii in range(len(down_samples)):
+                                logger.info(f"{type_str=} / {down_samples[ii].shape=}")
+                            logger.info(f"{type_str=} / {mid_sample.shape=}")
+                            '''
 
                             controlnet_result[frame_no][type_str] = sample_to_device((down_samples, mid_sample))
 
@@ -2899,17 +3157,29 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                         process_controlnet(controlnet_target)
 
-                    # expand the latents if we are doing classifier free guidance
-                    latent_model_input = (
-                        latents[:, :, context]
-                        .to(device)
-                        .repeat(prompt_encoder.get_condi_size(), 1, 1, 1, 1)
-                    )
+                    # expand the latents
+                    if latents.shape[0] == 1:
+                        latent_model_input = (
+                            latents[:, :, context]
+                            .to(device)
+                            .repeat(prompt_encoder.get_condi_size(), 1, 1, 1, 1)
+                        )
+                    else:
+                        latent_model_input=[]
+                        for s0_index in list(range(latents.shape[0])) + list(range(latents.shape[0])):
+                            latent_model_input.append( latents[s0_index:s0_index+1, :, context].to(device) )
+                        latent_model_input = torch.cat(latent_model_input)
+
+
                     latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                     cur_prompt = prompt_encoder.get_current_prompt_embeds(context, latents.shape[2]).to(device=device)
 
-                    down_block_res_samples,mid_block_res_sample = get_controlnet_result(context)
+                    if controlnet_for_region:
+                        down_block_res_samples,mid_block_res_sample = (None,None)
+                    else:
+                        down_block_res_samples,mid_block_res_sample = get_controlnet_result(context)
+
 
                     if c_ref_enable:
                         # ref only part
@@ -2952,16 +3222,20 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         if self.lora_map:
                             self.lora_map.apply(layer_index, latent_model_input.shape[0], context[len(context)//2])
 
-                        __do = []
-                        if down_block_res_samples is not None:
-                            for do in down_block_res_samples:
-                                __do.append(do[layer_index:layer_index+unet_batch_size])
+                        if controlnet_for_region:
+                            __do,__mid = get_controlnet_result(context, layer_index)
                         else:
-                            __do = None
+                            __do = []
+                            if down_block_res_samples is not None:
+                                for do in down_block_res_samples:
+                                    __do.append(do[layer_index:layer_index+unet_batch_size])
+                            else:
+                                __do = None
 
-                        __mid = None
-                        if mid_block_res_sample is not None:
-                            __mid = mid_block_res_sample[layer_index:layer_index+unet_batch_size]
+                            __mid = None
+                            if mid_block_res_sample is not None:
+                                __mid = mid_block_res_sample[layer_index:layer_index+unet_batch_size]
+
 
                         __lat = latent_model_input[layer_index:layer_index+unet_batch_size]
                         __cur_prompt = cur_prompt[layer_index * context_frames:(layer_index + unet_batch_size)*context_frames]
@@ -2997,7 +3271,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                         _inner_do_list = []
                                         for c_index, xy in enumerate( xy_list ):
                                             a_x, a_y = xy
-                                            _inner_do_list.append(_d[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+                                            _inner_do_list.append(_d[:,:,[c_index],(a_y + rate-1)//rate:((a_y+a_h)+ rate-1)//rate, (a_x+ rate-1)//rate:((a_x+a_w)+ rate-1)//rate ] )
 
                                         __tmp_do.append( torch.cat(_inner_do_list, dim=2) )
                                     __do = __tmp_do
@@ -3007,7 +3281,7 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                     _mid_list = []
                                     for c_index, xy in enumerate( xy_list ):
                                         a_x, a_y = xy
-                                        _mid_list.append( __mid[:,:,[c_index],a_y//rate:(a_y+a_h)//rate, a_x//rate:(a_x+a_w)//rate ] )
+                                        _mid_list.append( __mid[:,:,[c_index],(a_y+ rate-1)//rate:((a_y+a_h)+ rate-1)//rate, (a_x+ rate-1)//rate:((a_x+a_w)+ rate-1)//rate ] )
                                     __mid = torch.cat(_mid_list, dim=2)
 
                             stopwatch_record("crop self.unet start")
@@ -3030,7 +3304,8 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                         __pred.append( pred_layer )
 
-
+                    __do = None
+                    __mid = None
                     down_block_res_samples = None
                     mid_block_res_sample = None
 
@@ -3072,6 +3347,12 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     video = torch.from_numpy(self.decode_latents(denoised))
                     callback(i, video)
 
+                if gradual_latent:
+                    if prev_gradient_latent_size != cur_gradient_latent_size:
+                        noise_pred = resize_tensor(noise_pred, cur_gradient_latent_size, True)
+                        latents = resize_tensor(latents, cur_gradient_latent_size, True)
+
+
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(
                     model_output=noise_pred,
@@ -3081,41 +3362,67 @@ class AnimationPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     return_dict=False,
                 )[0]
 
-                latents_list = latents.chunk( noise_size )
+                if need_region_blend(i, len(timesteps)):
+                    latents_list = latents.chunk( noise_size )
 
-                tmp_latent = torch.zeros(
-                    latents_list[0].shape, device=latents.device, dtype=latents.dtype
-                )
+                    tmp_latent = torch.zeros(
+                        latents_list[0].shape, device=latents.device, dtype=latents.dtype
+                    )
 
-                for r_no in range(len(region_list)):
-                    mask = region_mask.get_mask( r_no )
-                    src = region_list[r_no]["src"]
-                    if src == -1:
-                        init_latents_proper = image_latents[:1]
+                    for r_no in range(len(region_list)):
+                        mask = region_mask.get_mask( r_no )
+                        if gradual_latent:
+                            mask = resize_tensor(mask, cur_gradient_latent_size)
+                        src = region_list[r_no]["src"]
+                        if src == -1:
+                            init_latents_proper = image_latents[:1]
 
-                        if i < len(timesteps) - 1:
-                            noise_timestep = timesteps[i + 1]
-                            init_latents_proper = self.scheduler.add_noise(
-                                init_latents_proper, noise, torch.tensor([noise_timestep])
-                            )
+                            if i < len(timesteps) - 1:
+                                noise_timestep = timesteps[i + 1]
+                                init_latents_proper = self.scheduler.add_noise(
+                                    init_latents_proper, noise, torch.tensor([noise_timestep])
+                                )
 
-                        lat = init_latents_proper
-                    else:
-                        lat = latents_list[src]
+                            if gradual_latent:
+                                lat = resize_tensor(init_latents_proper, cur_gradient_latent_size)
+                            else:
+                                lat = init_latents_proper
 
-                    tmp_latent = tmp_latent * (1-mask) + lat * mask
+                        else:
+                            lat = latents_list[src]
 
-                latents = tmp_latent
+                        tmp_latent = tmp_latent * (1-mask) + lat * mask
+
+                    latents = tmp_latent
 
                 init_latents_proper = None
                 lat = None
                 latents_list = None
                 tmp_latent = None
 
+                i+=1
+                real_i = max(i, real_i)
+                if gradual_latent:
+                    if prev_gradient_latent_size != cur_gradient_latent_size:
+                        reverse = min(i, reverse_steps)
+                        self.scheduler._step_index -= reverse
+                        _noise = resize_tensor(noise, cur_gradient_latent_size)
+                        for count in range(i, i+noise_add_count):
+                            count = min(count,len(timesteps)-1)
+                            latents = self.scheduler.add_noise(
+                                latents, _noise, torch.tensor([timesteps[count]])
+                            )
+                        i -= reverse
+                        torch.cuda.empty_cache()
+                        gc.collect()
+
+                prev_gradient_latent_size = cur_gradient_latent_size
+
                 stopwatch_stop("LOOP end")
 
         controlnet_result = None
         torch.cuda.empty_cache()
+        gc.collect()
 
         if c_ref_enable:
             self.unload_controlnet_ref_only(
