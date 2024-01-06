@@ -28,7 +28,7 @@ from transformers import (AutoImageProcessor, CLIPImageProcessor,
                           UperNetForSemanticSegmentation)
 
 from animatediff import get_dir
-from animatediff.dwpose import DWposeDetector
+#from animatediff.dwpose import DWposeDetector
 from animatediff.models.clip import CLIPSkipTextModel
 from animatediff.models.unet import UNet3DConditionModel
 from animatediff.pipelines import AnimationPipeline, load_text_embeddings

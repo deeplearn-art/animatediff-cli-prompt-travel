@@ -112,11 +112,12 @@ except ImportError:
     logger.debug("RIFE not available, skipping...", exc_info=True)
     rife_app = None
 
-
-from animatediff.stylize import stylize
-
-cli.add_typer(stylize, name="stylize")
-
+try:
+    import onnxruntime
+    from animatediff.stylize import stylize
+    cli.add_typer(stylize, name="stylize")
+except:
+    pass
 
 
 
