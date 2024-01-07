@@ -62,32 +62,14 @@ checkpoint_dir = data_dir.joinpath("models/sd")
 pipeline_dir = data_dir.joinpath("models/huggingface")
 
 
-try:
-    import google.colab
-    IN_COLAB = True
-except:
-    IN_COLAB = False
-
-if IN_COLAB:
-    import sys
-    logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stdout,
-        format="%(message)s",
-        datefmt="%H:%M:%S",
-        force=True,
-    )
-else:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-        handlers=[
-            RichHandler(console=console, rich_tracebacks=True),
-        ],
-        datefmt="%H:%M:%S",
-        force=True,
-    )
-
+import sys
+logging.basicConfig(
+    level=logging.DEBUG,
+    stream=sys.stdout,
+    format="%(message)s",
+    datefmt="%H:%M:%S",
+    force=True,
+)
 logger = logging.getLogger(__name__)
 
 
